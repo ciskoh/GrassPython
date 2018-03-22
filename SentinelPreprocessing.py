@@ -1,20 +1,31 @@
 #!/usr/bin/env python
+#----------------------------DESCRIPTION
+#Script to preprocess sentinel images with QGIS using GRASS Modules
 
-import os
+#------------------------------SETTINGS-------------------------
+# Prepare the environment
+import qgis
+from qgis.core import *
 import sys
-import time
-from PyQt4.QtGui import *
-from PyQt4.QtCore import *
-import sys
+
+app = QgsApplication([],True, None)
+app.setPrefixPath("/usr", True)
+app.initQgis()
+sys.path.append('/usr/share/qgis/python/plugins')
+from processing.core.Processing import Processing
+Processing.initialize()
 import processing as p
+
+
+
+import time
 import xml.etree.ElementTree as ET
 from decimal import *
 from pyproj import Proj, transform
 from multiprocessing import Pool
 import datetime
 
-#----------------------------DESCRIPTION
-#Script to preprocess sentinel images with QGIS using GRASS Modules
+
 
 #----------------------------PARAMETERS
 #input directory
@@ -37,7 +48,42 @@ dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 outd="/home/jkm2/GIS/Sentinel_preprocess/test/output"
 # working folder for temporary folders
 temp1="/tmp/"
-#------------------------------------------------------------------------------------------------
+#------------------------------SETTINGS-------------------------
+# Prepare the environment
+import sys
+from qgis.core import *
+from PyQt4.QtGui import *
+app = QApplication([])
+QgsApplication.setPrefixPath("/usr", True)
+# create a reference to the QgsApplication, setting the
+# second argument to False disables the GUI
+qgs = QgsApplication([], False)
+QgsApplication.initQgis()
+
+# Prepare processing framework 
+sys.path.append('/usr/share/qgis/python/plugins/processing') # Folder where Processing is located
+from processing.core.Processing import Processing
+Processing.initialize()
+from processing.tools import *
+
+# load providers
+qgs.initQgis()
+
+import os
+import sys
+import time
+from PyQt4.QtGui import *
+from PyQt4.QtCore import *
+import sys
+#import processing as p
+import xml.etree.ElementTree as ET
+from decimal import *
+from pyproj import Proj, transform
+from multiprocessing import Pool
+import datetime
+
+#-------------------------------CODE---------------------------------
+
 ####LOG
 timestr=(
     '1{date:%Y-%m-%d %H:%M:%S}'.format( date=datetime.datetime.now() )
@@ -333,8 +379,14 @@ def correct(ipat):
     
 #calling function
 
-results=pool.map(correct, RlistNP)
-
+#results=pool.map(correct, RlistNP)
+print RlistNP
+for ipat in RlistNP:
+    print ipat
+    res=correct(ipat)
+    
+    
+    
 	#### 5 Vegetation indices calculation
 
 	# get bands for NDVI
@@ -377,3 +429,12 @@ timestr2=(
     
 logstr="Corrected images are available in %s" %(outd)
 logstr2="Script finished correctly at %s" %(timestr2)
+
+
+# When your script is complete, call exitQgis() to remove the provider and
+# layer registries from memory
+qgs.exitQgis()
+
+
+
+
