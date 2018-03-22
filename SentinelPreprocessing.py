@@ -10,34 +10,45 @@ import processing as p
 import xml.etree.ElementTree as ET
 from decimal import *
 from pyproj import Proj, transform
-
-
+from multiprocessing import Pool
+import datetime
 
 #----------------------------DESCRIPTION
 #Script to preprocess sentinel images with QGIS using GRASS Modules
 
 #----------------------------PARAMETERS
 #input directory
-# remote dir ind="/home/jkm2/GIS/Sentinel_preprocess/test/input"
-# local dir
-ind="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/input"
+# remote dir 
+ind="/home/jkm2/GIS/Sentinel_preprocess/test/input"
+# local dir ind="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/input"
 #code of image tiles to be analysed
 tiles=['T30STA', 'T30STB', 'T30SUA', 'T30SUB']
 
 #years to be considered
 yea=[2016, 2017, 2018]
 
-# metadata folder
-mdPath="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/metadata"
+#
 #path to Dem for topographic correction
-dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/ASTER_big/asterDemUTM/asterDemUTM.vrt"
+dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 
 # output directory
-outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
-
+#local dir outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
+#remote dir
+outd="/home/jkm2/GIS/Sentinel_preprocess/test/output"
 # working folder for temporary folders
 temp1="/tmp/"
 #------------------------------------------------------------------------------------------------
+####LOG
+timestr=(
+    '1{date:%Y-%m-%d %H:%M:%S}'.format( date=datetime.datetime.now() )
+    )
+    
+logpath=outd+"/"+"log.txt"
+Lfile=open(logpath, "w")
+logtext= "Athmospheric correction using SentinelPreprocessing.py started at %s" %(timestr)
+Lfile.write(logtext)
+print logtext
+
 #### 0- TRIGGER
 #TRIGGER to check if there are new images
 
@@ -75,7 +86,9 @@ RlistNP=[y for y in rlist if os.path.basename(y) not in Ochlist]
 if len(RlistNP) == 0:
     quit()
 else:
-    print "\nfound %d unprocessed images" %(len(RlistNP))
+    logstr2= "\nfound %d unprocessed images" %(len(RlistNP))
+    Lfile.write(logstr2)
+    print logstr2
     print "\nthe following images will be processed"
     for i in RlistNP:
         print os.path.basename(i)
@@ -97,177 +110,230 @@ else:
 #results = pool.map(solve1, args)
 
 #***********Temporary variable to avoid loop
-ipat=RlistNP[0]
+#ipat=RlistNP[0]
 	
 #*************************************************
 # get path of image
 	# import image
-fileName = ipat
-fileInfo = QFileInfo(fileName)
-baseName = fileInfo.baseName()
-orImg = QgsRasterLayer(fileName, baseName)
-if not orImg.isValid():
-    print "\nLayer failed to load!"
-
-#check of reference system and reprojection
-imgCrs= orImg.crs()
-print "\nImage CRS :", imgCrs.description()
-
-if QgsRasterLayer(dem).crs() != imgCrs:
-    print "\nreprojecting DEM to %" %imgCrs.description()
-    #TODO: reproject DEM
-else:
-    print "\nall files are in the same CRS!"
- 
- #### separate images in multiple layers
- # count number of bands and create list of names
-brange=range(1,orImg.bandCount()+1)
-blist=["band"+str(x) for x in brange]
-
-# get coordinates
-extImg="%f,%f,%f,%f" %(orImg.extent().xMinimum(),\
-    orImg.extent().xMaximum(),\
-    orImg.extent().yMinimum(),\
-    orImg.extent().yMaximum())
-###if not os.path.exists(bpat):
-try:
-	bPatDic
-except NameError:
-	bPatDic={}
-if len(bPatDic) == 0:
-    #create dictionary to hold band names and path
-    bPatDic={}
-    for i in brange:
-        #name of band
-        bname=blist[i-1]
-        bstr="-b "+str(i)
-        #save raster in temp folder
-        print "saving %s" %(bname)
-        tband=p.runalg("gdalogr:translate",orImg,100,True,"",0,"",extImg,False,6,4,75,6,1,False,0,False,bstr,None)
-        if QgsRasterLayer(tband['OUTPUT']).isValid():
-            print "layer %s is valid" %bname
-            bPatDic[bname]=tband['OUTPUT']
-
-#### 3 Athmospheric correction
-
-#### create 6s parameters file for each band
-# preparation parameters for 6S 
-#For second line
-#read end of basename for date and time
-dateS=baseName[11:26]
-
-year=dateS[0:4]
-month=dateS[4:6]
-day=dateS[6:8]
-
-hours=dateS[9:11]
-minutes=dateS[11:13]
-seconds=dateS[13:15]
-# hours and day in decimal time
-dmin=round(100*float(minutes)/60,2)
-
-dtime=str(hours)+"."+str(dmin)
-
-#long lat (centre point)
-long=orImg.extent().xMinimum()+((orImg.extent().xMaximum()-orImg.extent().xMinimum())/2)
-lat=orImg.extent().yMinimum()+((orImg.extent().yMaximum()-orImg.extent().yMinimum())/2)
-# transform long and lat in WGS 84
-crsDest=QgsCoordinateReferenceSystem(4326)
-xform = QgsCoordinateTransform(orImg.crs(), crsDest)
-ncoord=xform.transform(QgsPoint(long,lat))
-
-# For seventh line (average altitude in km)
-#altitude average
-demStats=p.runalg("grass7:r.univar",dem,None,"","",False,extImg,None)
-statFile=open(demStats['output'], "r")
-line=statFile.read().splitlines()[1]
-#negative altitude average in km
-avgDem=-1*float(line.split('|')[6])/1000
-
-#For eighth line (Sensor band)
-# band codes as dictionary
-bcodes=range(166, 179)
-
-
-####---- Loop through bands
-for i in brange:
-    band="band"+str(i)
-    bRast=QgsRasterLayer(bPatDic[band])
+#calling process as function
+def correct(ipat):
+    fileName = ipat
+    fileInfo = QFileInfo(fileName)
+    baseName = fileInfo.baseName()
+    orImg = QgsRasterLayer(fileName, baseName)
+    if not orImg.isValid():
+        print "\nLayer failed to load!"
     
-    #path to parameter file
-    Spath=str(temp1+baseName+band+"atcorParam.txt")
-    Sfile=open(Spath, "w")
-    #Writing paramater file
-    #first line : satellite type
-    firstLine="25\n"
-    Sfile.write(firstLine)
-    print "first line of 6S parameter file is %s" %firstLine
+    #check of reference system and reprojection
+    imgCrs= orImg.crs()
+    print "\nImage CRS :", imgCrs.description()
 
-    print "centre-point coordinates are %s " %ncoord
-    #second line : month,day,hh.ddd,long.,lat. :
-    secondLine=str(month)+" "+str(day)+" "+str(dtime)+" "+str(ncoord.x())+" "+str(ncoord.y())+"\n"
-    Sfile.write(secondLine)
-    print "second line of 6S parameter file is (month, day, hh.ddd, long, lat):\n %s" %secondLine
-
-    #third line of parameter file athmospheric model (1) continental
-    if month < 3 or month > 10:
-        atmMod=3
+    if QgsRasterLayer(dem).crs() != imgCrs:
+        print "\nreprojecting DEM to %s" %(imgCrs.description())
+        #TODO: reproject DEM
     else:
-        atmMod=2
-    thirdLine="%s \n" %atmMod
-    Sfile.write(thirdLine)
-    print "third line of 6S parameter file is  (Athmospheric model):\n %s" %thirdLine
+        print "\nall files are in the same CRS!"
+     
+     #### separate images in multiple layers
+     # count number of bands and create list of names
+    brange=range(1,orImg.bandCount()+1)
+    blist=["band"+str(x) for x in brange]
 
-    #C: 1 continental model
-    fourthLine="1\n"
-    Sfile.write(fourthLine)
-    print "fourth line of 6S parameter file is (Aereosol model):\n %s" %fourthLine
+    # get coordinates
+    extImg="%f,%f,%f,%f" %(orImg.extent().xMinimum(),\
+        orImg.extent().xMaximum(),\
+        orImg.extent().yMinimum(),\
+        orImg.extent().yMaximum())
 
-    #D. Aerosol concentration model (visibility)
+    try:
+        bPatDic
+    except NameError:
+        bPatDic={}
+    if len(bPatDic) == 0:
+        #create dictionary to hold band names and path
+        bPatDic={}
+        for i in brange:
+            #name of band
+            bname=blist[i-1]
+            bstr="-b "+str(i)
+            #save raster in temp folder
+            print "saving %s" %(bname)
+            tband=p.runalg("gdalogr:translate",orImg,100,True,"",0,"",extImg,False,6,4,75,6,1,False,0,False,bstr,None)
+            if QgsRasterLayer(tband['OUTPUT']).isValid():
+                print "layer %s is valid" %bname
+                bPatDic[bname]=tband['OUTPUT']
 
-    fifthLine="-1\n"
-    sixthLine="0\n"
-    Sfile.write(fifthLine)
-    Sfile.write(sixthLine)
-    print "fifth and sixth line of 6S parameter file is (Visibility model):\n %s and %s" %(fifthLine, sixthLine)
-    #E: Target altitude (xps): -1000
-    # sensor platform (xpp): in kilometers -1.500
-    seventhLine=str(avgDem)+"\n"
-    eighthLine="-1000\n"
-    Sfile.write(seventhLine)
-    Sfile.write(eighthLine)
-    print "7th and 8th lines of 6S parameter file is %s %s " %(seventhLine, eighthLine)
-    # F : sensor band code
-    ninthLine=str(bcodes[i-1])+"\n"
-    Sfile.write(ninthLine)
-    print "9th line of 6S parameter file is %s " %(ninthLine)
-    Sfile.close()
-    #minimum and maximum pixel value
-    #range of values
-    prov=bRast.dataProvider()
-    stats=prov.bandStatistics(1)
-    pMin=stats.minimumValue
-    pMax=stats.maximumValue
-    pRange=str(pMin)+","+str(pMax)
+    #### 3 Athmospheric correction
 
-    # launch athmospheric correction
-    #TODO: improve algorithm
-    #corrImg=p.runalg("grass7:i.atcorr",bRast,pRange,\
-       # dem, None,mDpat,"0.0,255.0",False,True,False,False,"117975.229898,500013.259194,3470154.5897,3769391.47316",0,None)
-        # launch topographic correction
+    #### create 6s parameters file for each band
+    # preparation parameters for 6S 
+    #For second line
+    #read end of basename for date and time
+    dateS=baseName[11:26]
+
+    year=dateS[0:4]
+    month=dateS[4:6]
+    day=dateS[6:8]
+
+    hours=dateS[9:11]
+    minutes=dateS[11:13]
+    seconds=dateS[13:15]
+    # hours and day in decimal time
+    dmin=round(100*float(minutes)/60,0)
+
+    dtime=str(hours)+"."+str(dmin/100)[2:]
+
+    #long lat (centre point)
+    long=orImg.extent().xMinimum()+((orImg.extent().xMaximum()-orImg.extent().xMinimum())/2)
+    lat=orImg.extent().yMinimum()+((orImg.extent().yMaximum()-orImg.extent().yMinimum())/2)
+    # transform long and lat in WGS 84
+    crsDest=QgsCoordinateReferenceSystem(4326)
+    xform = QgsCoordinateTransform(orImg.crs(), crsDest)
+    ncoord=xform.transform(QgsPoint(long,lat))
+
+    # For seventh line (average altitude in km)
+    #altitude average
+    demStats=p.runalg("grass7:r.univar",dem,None,"","",False,extImg,None)
+    statFile=open(demStats['output'], "r")
+    line=statFile.read().splitlines()[1]
+    #negative altitude average in km
+    avgDem=-1*float(line.split('|')[6])/1000
+
+    #For eighth line (Sensor band)
+    # band codes as dictionary
+    bcodes=range(166, 179)
+
+    try:
+        corrDic
+    except NameError:
+        corrDic={}
+            
+    ####---- Loop through bands
+    for i in brange:
+        band="band"+str(i)
+        bRast=QgsRasterLayer(bPatDic[band])
+        
+        #path to parameter file
+        Spath=str(temp1+baseName+band+"atcorParam.txt")
+        Sfile=open(Spath, "w")
+        #Writing paramater file
+        #first line : satellite type
+        firstLine="25\n"
+        Sfile.write(firstLine)
+        print "first line of 6S parameter file is %s" %firstLine
+
+        print "centre-point coordinates are %s " %ncoord
+        #second line : month,day,hh.ddd,long.,lat. :
+        secondLine=str(month)+" "+str(day)+" "+str(dtime)+" "+str(ncoord.x())+" "+str(ncoord.y())+"\n"
+        Sfile.write(secondLine)
+        print "second line of 6S parameter file is (month, day, hh.ddd, long, lat):\n %s" %secondLine
+
+        #third line of parameter file athmospheric model (1) continental
+        if month < 3 or month > 10:
+            atmMod=3
+        else:
+            atmMod=2
+        thirdLine="%s \n" %atmMod
+        Sfile.write(thirdLine)
+        print "third line of 6S parameter file is  (Athmospheric model):\n %s" %thirdLine
+
+        #C: 1 continental model
+        fourthLine="1\n"
+        Sfile.write(fourthLine)
+        print "fourth line of 6S parameter file is (Aereosol model):\n %s" %fourthLine
+
+        #D. Aerosol concentration model (visibility)
+
+        fifthLine="-1\n"
+        sixthLine="0\n"
+        Sfile.write(fifthLine)
+        Sfile.write(sixthLine)
+        print "fifth and sixth line of 6S parameter file is (Visibility model):\n %s and %s" %(fifthLine, sixthLine)
+        #E: Target altitude (xps): -1000
+        # sensor platform (xpp): in kilometers -1.500
+        seventhLine=str(avgDem)+"\n"
+        eighthLine="-1000\n"
+        Sfile.write(seventhLine)
+        Sfile.write(eighthLine)
+        print "7th and 8th lines of 6S parameter file is %s %s " %(seventhLine, eighthLine)
+        # F : sensor band code
+        ninthLine=str(bcodes[i-1])+"\n"
+        Sfile.write(ninthLine)
+        print "9th line of 6S parameter file is %s " %(ninthLine)
+        Sfile.close()
+        #minimum and maximum pixel value
+        #range of values
+        prov=bRast.dataProvider()
+        stats=prov.bandStatistics(1)
+        pMin=stats.minimumValue
+        pMax=stats.maximumValue
+        pRange=str(pMin)+","+str(pMax)
+        # launch athmospheric correction
+        
+        corrImg=p.runalg("grass7:i.atcorr",bRast,pRange,None, None,Spath,pRange,False,True,False,False,extImg,0,None)
+        corrImg2=p.runalg("gdalogr:translate",corrImg['output'],100,True,"",0,"",extImg,False,6,4,75,6,1,False,0,False,"",None)
+        corrDic[band]=corrImg2['OUTPUT']
+
+    # preparing list of inputs for topographic correction
+    inpList=[corrDic[x] for x in blist ]
+    #### TOPOGRAPHIC CORRECTION
+    # preparation
+    #calculating sun azimuth and zenith
+
+    #sunMod= p.runalg("grass7:r.sunhours",year,month,day,hours,minutes,seconds,"","",False,False,extImg,0,None,None,None)
+    #
+    ##function to extract minimum value from metadata
+    #def getMin(rast):
+    #    layer=QgsRasterLayer(rast).metadata()
+    #    text1=layer.split("STATISTICS_MINIMUM")[1]
+    #    text2=text1.split("</p")[0][1:]
+    #    return float(text2)
+    #    
+    ##calling function on results of Sun Mod
+    #elevation=getMin(sunMod['elevation'])
+    #zenith=90-elevation
+    #azimuth=getMin(sunMod['azimuth'])
+    ##illumination model
+    #ilMod=p.runalg("grass7:i.topo.coor.ill",dem,elevation,azimuth,extImg,0,None)
 
 
+    ##actual topographic correction
+    #topocorr=p.runalg("grass7:i.topo.corr",inpList,ilMod['output'],zenith,0,False,extImg,None)
+    #
+    ##extracting path to topo corrected tif files
+    #topocList=[]
+    #for r,d,files in os.walk(topocorr['output']):
+    #        for f in files:
+    #            if f.endswith(".tif"):
+    #                topocList.append(os.path.join(r,f))
+    #
+    ##verify topographically corrected files
+    #for i in topocList:
+    #    if not QgsRasterLayer(i).isValid():
+    #        print "problem with topographically corrected files"
+    #    else:
+    #        print " all bands have been topographically corrected"
 
 
-	#### 4 Masking out bad pixels
+    #Exporting Images
+    #scene idnetifier for folder
+    scId=baseName.split("_")[5]
+    outpath=os.path.join(outd,scId)
+    if not os.path.exists(outpath):
+        os.makedirs(outpath)
 
-	# band of quality assessment
+    outpath2=outpath+"/"+baseName+".tif"
+    final=p.runalg("gdalogr:merge",inpList,False,True,6,outpath2)
+    
+    #cleanup
+    bPatDic={}
+    corrDic={}
+    
+    return final['OUTPUT']
+    
+#calling function
 
-	# bitwise and to exclude clouds
-
-	# bitwise and to exclude snow
-
-
+results=pool.map(correct, RlistNP)
 
 	#### 5 Vegetation indices calculation
 
@@ -304,4 +370,10 @@ for i in brange:
 # add number of images
 
 #8 Clean up
-#bPatDic={}
+#Log conclude
+timestr2=(
+    '1{date:%Y-%m-%d %H:%M:%S}'.format( date=datetime.datetime.now() )
+    )
+    
+logstr="Corrected images are available in %s" %(outd)
+logstr2="Script finished correctly at %s" %(timestr2)
