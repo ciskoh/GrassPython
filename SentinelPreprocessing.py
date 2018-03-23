@@ -186,7 +186,7 @@ def correct(ipat):
     #For second line
     #read end of basename for date and time
     dateS=baseName[11:26]
-
+    print "date of image %s is %s" %(baseName,dateS)
     year=dateS[0:4]
     month=dateS[4:6]
     day=dateS[6:8]
