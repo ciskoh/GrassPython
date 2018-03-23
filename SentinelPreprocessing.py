@@ -4,9 +4,12 @@
 
 #------------------------------SETTINGS-------------------------
 # Prepare the environment
+import sys
+import os
 import qgis
 from qgis.core import *
-import sys
+from PyQt4.QtGui import *
+
 
 app = QgsApplication([],True, None)
 app.setPrefixPath("/usr", True)
@@ -24,13 +27,14 @@ from decimal import *
 from pyproj import Proj, transform
 from multiprocessing import Pool
 import datetime
-
+import numpy as np
+from osgeo import gdal
 
 
 #----------------------------PARAMETERS
 #input directory
 # remote dir 
-ind="/home/jkm2/GIS/Sentinel_preprocess/test/input"
+ind="/mnt/cephfs/data/BFH/Geodata/World/Sentinel-2/S2MSI1C/GeoTIFF"
 # local dir ind="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/input"
 #code of image tiles to be analysed
 tiles=['T30STA', 'T30STB', 'T30SUA', 'T30SUB']
@@ -47,41 +51,7 @@ dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 #remote dir
 outd="/home/jkm2/GIS/Sentinel_preprocess/test/output"
 # working folder for temporary folders
-temp1="/tmp/"
-#------------------------------SETTINGS-------------------------
-# Prepare the environment
-import sys
-from qgis.core import *
-from PyQt4.QtGui import *
-app = QApplication([])
-QgsApplication.setPrefixPath("/usr", True)
-# create a reference to the QgsApplication, setting the
-# second argument to False disables the GUI
-qgs = QgsApplication([], False)
-QgsApplication.initQgis()
-
-# Prepare processing framework 
-sys.path.append('/usr/share/qgis/python/plugins/processing') # Folder where Processing is located
-from processing.core.Processing import Processing
-Processing.initialize()
-from processing.tools import *
-
-# load providers
-qgs.initQgis()
-
-import os
-import sys
-import time
-from PyQt4.QtGui import *
-from PyQt4.QtCore import *
-import sys
-#import processing as p
-import xml.etree.ElementTree as ET
-from decimal import *
-from pyproj import Proj, transform
-from multiprocessing import Pool
-import datetime
-
+temp1="/home/jkm2/GIS/Sentinel_preprocess/test/WOD"
 #-------------------------------CODE---------------------------------
 
 ####LOG
@@ -130,6 +100,7 @@ RlistNP=[y for y in rlist if os.path.basename(y) not in Ochlist]
 
 #if sublist is of length 0 exit right now
 if len(RlistNP) == 0:
+    print "no image to correct.\nQuitting program"
     quit()
 else:
     logstr2= "\nfound %d unprocessed images" %(len(RlistNP))
@@ -164,8 +135,7 @@ else:
 #calling process as function
 def correct(ipat):
     fileName = ipat
-    fileInfo = QFileInfo(fileName)
-    baseName = fileInfo.baseName()
+    baseName = os.path.basename(dem)[0:-4]
     orImg = QgsRasterLayer(fileName, baseName)
     if not orImg.isValid():
         print "\nLayer failed to load!"
@@ -309,16 +279,20 @@ def correct(ipat):
         Sfile.close()
         #minimum and maximum pixel value
         #range of values
-        prov=bRast.dataProvider()
-        stats=prov.bandStatistics(1)
-        pMin=stats.minimumValue
-        pMax=stats.maximumValue
+        ds = gdal.Open(dem)
+	myarray = np.array(ds.GetRasterBand(1).ReadAsArray())
+        pMin=np.nanmax(myarray)
+        pMax=np.nanmin(myarray)
         pRange=str(pMin)+","+str(pMax)
+	print 'pixel range is %s' %(pRange)
         # launch athmospheric correction
         
+	print "launching athmospheric correction on image"+baseName[-10:]
         corrImg=p.runalg("grass7:i.atcorr",bRast,pRange,None, None,Spath,pRange,False,True,False,False,extImg,0,None)
-        corrImg2=p.runalg("gdalogr:translate",corrImg['output'],100,True,"",0,"",extImg,False,6,4,75,6,1,False,0,False,"",None)
-        corrDic[band]=corrImg2['OUTPUT']
+        #corrImg2=p.runalg("gdalogr:translate",corrImg['output'],100,True,"",0,"",extImg,False,6,4,75,6,1,False,0,False,"",None)
+	if QgsRasterLayer(corrImg['output']).isValid:
+		print "athmospheric correction is valid"
+        	corrDic[band]=corrImg['output']
 
     # preparing list of inputs for topographic correction
     inpList=[corrDic[x] for x in blist ]
