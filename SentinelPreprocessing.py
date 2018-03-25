@@ -29,9 +29,9 @@ from osgeo import gdal
 
 #----------------------------PARAMETERS
 #input directory
-# remote dir ind="/mnt/cephfs/data/BFH/Geodata/World/Sentinel-2/S2MSI1C/GeoTIFF"
-# local dir 
-ind="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/input"
+# remote dir 
+ind="/mnt/cephfs/data/BFH/Geodata/World/Sentinel-2/S2MSI1C/GeoTIFF"
+# local dir ind="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/input"
 #code of image tiles to be analysed
 tiles=['T30STA', 'T30STB', 'T30SUA', 'T30SUB']
 
@@ -40,14 +40,14 @@ yea=[2016, 2017, 2018]
 
 #
 #path to Dem for topographic correction
-#remote dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
-#local 
-dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
+#remote 
+dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
+#local dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 
 # output directory
-#local dir 
-outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
-#remote dir outd="/home/jkm2/GIS/Sentinel_preprocess/test/output"
+#local dir outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
+#remote dir 
+outd="/home/jkm2/GIS/Sentinel_preprocess/test/output"
 # working folder for temporary folders
 temp1="/tmp"
 #-------------------------------CODE---------------------------------
@@ -137,10 +137,10 @@ def correct(ipat):
                 ldem.extent().yMaximum())
         crsStr=imgCrs.authid()
         newdem=p.runalg("gdalogr:warpreproject",ldem,"",crsStr,"",30,0,False,extdem,"",5,4,75,6,1,False,0,False,"",None)
-#        LnDem=QgsRasterLayer(newdem['OUTPUT'])
-#        if LnDem.isValid():
-#            print "dem reprojected correctly"
-#            dem=newdem['OUTPUT']
+        LnDem=QgsRasterLayer(newdem['OUTPUT'])
+        if LnDem.isValid():
+            print "dem reprojected correctly"
+            dem=newdem['OUTPUT']
     else:
         print "\nall files are in the same CRS!"
      
@@ -155,20 +155,21 @@ def correct(ipat):
         bname="band"+str(i)
         directory=temp1+"/"+baseName
         path=directory+"/"+bname+".tif"
-        if not QgsRasterLayer(path).isValid():
-            if not os.path.exists(directory):
-                os.makedirs(directory)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
     #        call to gdal translate with option
-                gdal.Translate(path, rast, bandList=[i])
-                if not QgsRasterLayer(path).isValid():
-                    print "problem saving single band %s" %(i)          
-                else:
-                    print "band %s saved in %s" %(i, path)
-                    return bname,path
+        gdal.Translate(path, rast, bandList=[i])
+        if not QgsRasterLayer(path).isValid():
+            print "problem saving single band %s" %(i)          
+        else:
+            print "band %s saved in %s" %(i, path)
+        return path
 #call to function
     bPatDic={}
     for i in brange:
-        bPatDic["band"+str(i)]=expBand(ipat, i)
+        tp=expBand(ipat, i)
+	bPatDic["band"+str(i)]=tp
+    print bPatDic
 
     #### 3 Athmospheric correction
 
@@ -216,6 +217,10 @@ def correct(ipat):
     for i in brange:
         band="band"+str(i)
         bRast=QgsRasterLayer(bPatDic[band])
+	if not bRast.isValid():
+		print "problem with raster band image to correct"
+		print "\n path to image is: %s" %(bPatDic[band])
+		quit()
         
         #path to parameter file
         Spath=str(temp1+"/"+baseName+"/"+band+"_.atcorParam.txt")
@@ -332,46 +337,33 @@ def correct(ipat):
 
     outpath2=outpath+"/"+baseName+".tif"
     final=p.runalg("gdalogr:merge",inpList,False,True,6,outpath2)
-    
+    print "final multilayer image is saved"
     #cleanup
     bPatDic={}
     corrDic={}
+    #remove corrected single bands 
+    clList=[corrDic[x] for x in blist ]
+    for y in clList:
+	os.path.remove(y)
+    # remove single bands
+    clList=[bPatDic[x] for x in blist ]
+    for z in clList:
+        os.path.remove(z)
+    print "all working files removed"
+	
     
     return final['OUTPUT']
     
-#calling function
-#pool=Pool(4)
-#results=pool.map(correct, RlistNP)
+#calling function in parallel mode
+pool=Pool(10)
+results=pool.map(correct, RlistNP)
+
+### procedural run
 print "\n\n"+str(RlistNP)
 results=correct(RlistNP[0])
 #for ipat in RlistNP:
 #    print ipat
 #    res=correct(ipat)
-    
-    
-    
-	#### 5 Vegetation indices calculation
-
-	# get bands for NDVI
-
-	# calculate soil adjusted NDVI
-
-	# get swir band (with pansharpening?)
-
-	# other vegetation index
-
-
-
-	#### 6 Exporting
-	
-	# Create image-specific folder in outd
-
-	# create folder for all bands
-
-	# create folder for vegetation indices
-
-	# Export images
-
 # end of cycle
 
 
@@ -396,6 +388,8 @@ logstr2="Script finished correctly at %s" %(timestr2)
 Lfile.write(logstr)
 Lfile.write(logstr2)
 Lfile.close()
+print logstr
+print logstr2
 # When your script is complete, call exitQgis() to remove the provider and
 # layer registries from memory
 #Qgs.exitQgis()
