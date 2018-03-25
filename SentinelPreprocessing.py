@@ -109,6 +109,7 @@ else:
     print "\nthe following images will be processed"
     for i in RlistNP:
         print os.path.basename(i)
+	Lfile.write(os.path.basename(i))
 
 #### 1 set qgis variables and open mapset
 
@@ -185,7 +186,7 @@ def correct(ipat):
     # preparation parameters for 6S 
     #For second line
     #read end of basename for date and time
-    dateS=baseName[11:26]
+    dateS=baseName.split("_")[2]
     print "date of image %s is %s" %(baseName,dateS)
     year=dateS[0:4]
     month=dateS[4:6]
@@ -352,12 +353,12 @@ def correct(ipat):
     return final['OUTPUT']
     
 #calling function
-
-#results=pool.map(correct, RlistNP)
-print RlistNP
-for ipat in RlistNP:
-    print ipat
-    res=correct(ipat)
+pool=Pool(88)
+results=pool.map(correct, RlistNP)
+#print RlistNP
+#for ipat in RlistNP:
+    #print ipat
+    #res=correct(ipat)
     
     
     
