@@ -20,10 +20,6 @@ Processing.initialize()
 import processing as p
 
 
-
-import time
-import xml.etree.ElementTree as ET
-from decimal import *
 from pyproj import Proj, transform
 from multiprocessing import Pool
 import datetime
@@ -33,9 +29,9 @@ from osgeo import gdal
 
 #----------------------------PARAMETERS
 #input directory
-# remote dir 
-ind="/mnt/cephfs/data/BFH/Geodata/World/Sentinel-2/S2MSI1C/GeoTIFF"
-# local dir ind="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/input"
+# remote dir ind="/mnt/cephfs/data/BFH/Geodata/World/Sentinel-2/S2MSI1C/GeoTIFF"
+# local dir 
+ind="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/input"
 #code of image tiles to be analysed
 tiles=['T30STA', 'T30STB', 'T30SUA', 'T30SUB']
 
@@ -44,14 +40,16 @@ yea=[2016, 2017, 2018]
 
 #
 #path to Dem for topographic correction
-dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
+#remote dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
+#local 
+dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 
 # output directory
-#local dir outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
-#remote dir
-outd="/home/jkm2/GIS/Sentinel_preprocess/test/output"
+#local dir 
+outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
+#remote dir outd="/home/jkm2/GIS/Sentinel_preprocess/test/output"
 # working folder for temporary folders
-temp1="/home/jkm2/GIS/Sentinel_preprocess/test/WOD"
+temp1="/tmp"
 #-------------------------------CODE---------------------------------
 
 ####LOG
@@ -61,7 +59,7 @@ timestr=(
     
 logpath=outd+"/"+"log.txt"
 Lfile=open(logpath, "w")
-logtext= "Athmospheric correction using SentinelPreprocessing.py started at %s" %(timestr)
+logtext= "\nAthmospheric correction using SentinelPreprocessing.py started at %s" %(timestr)
 Lfile.write(logtext)
 print logtext
 
@@ -69,38 +67,35 @@ print logtext
 #TRIGGER to check if there are new images
 
 ##Search for images in input directory
+#function to search for images recursively
 # empty list with root
-rlist=[] 
-#path to images
-multifolds=(ind+"/"+tile for tile in tiles)
-#search for tiff files in folder
-for i in multifolds:
-    for r,d,files in os.walk(i):
-        for f in files:
-            if f.endswith(".tif"):
-                rlist.append(os.path.join(r,f))
-
-
+def srcImg(folds):
+    bnlist=[]
+    rlist=[]
+	#search for tiff files in folder
+    for i in folds:
+        for r,d,files in os.walk(i):
+            for f in files:
+                if f.endswith(".tif"):
+                    bnlist.append(f)
+                    rlist.append(os.path.join(r,f))
+    finlist=[bnlist, rlist]
+    return finlist
+###Search in input directory
+multifolds1=(ind+"/"+tile for tile in tiles)
+Orlist=srcImg(multifolds1)
 ##Search in output directory
 
-multifolds=(outd+"/"+tile for tile in tiles)
-#list of output images
-
-#actual search of images
-Ochlist=[]
-for i in multifolds:
-    for r,d,files in os.walk(i):
-        for f in files:
-            if f.endswith(".tif"):
-                Ochlist.append(f)
-
+multifolds2=(outd+"/"+tile for tile in tiles)
+Outlist=srcImg(multifolds2)
+####list of output images
 # get sublist of missing/non processed images
 
-RlistNP=[y for y in rlist if os.path.basename(y) not in Ochlist]
+RlistNP=[y for y in Orlist[1] if os.path.basename(y) not in Outlist[0]]
 
 #if sublist is of length 0 exit right now
 if len(RlistNP) == 0:
-    print "no image to correct.\nQuitting program"
+    print "no image to correct.\n\n****Quitting program****"
     quit()
 else:
     logstr2= "\nfound %d unprocessed images" %(len(RlistNP))
@@ -110,43 +105,42 @@ else:
     for i in RlistNP:
         print os.path.basename(i)
 
-#### 1 set qgis variables and open mapset
-
-#Python variables to be set for qgis
-
-#Open qgis
-
-#### 2 Import images
-
-#list of of folders
-
-
-# cycle through sublist
-#Parallel instead of cycle
-#args = [A, B]
-#results = pool.map(solve1, args)
-
-#***********Temporary variable to avoid loop
-#ipat=RlistNP[0]
-	
-#*************************************************
 # get path of image
 	# import image
 #calling process as function
 def correct(ipat):
-    fileName = ipat
-    baseName = os.path.basename(dem)[0:-4]
-    orImg = QgsRasterLayer(fileName, baseName)
+    # use global variables
+    global dem
+    global outd
+    global temp
+    #get baseName
+    baseName = os.path.basename(ipat)[0:-4]
+    orImg = QgsRasterLayer(ipat, baseName)
     if not orImg.isValid():
         print "\nLayer failed to load!"
-    
+    # image extension as string
+    extImg="%f,%f,%f,%f" %(orImg.extent().xMinimum(),\
+                orImg.extent().xMaximum(),\
+                orImg.extent().yMinimum(),\
+                orImg.extent().yMaximum())
     #check of reference system and reprojection
     imgCrs= orImg.crs()
-    print "\nImage CRS :", imgCrs.description()
+    demCrs=QgsRasterLayer(dem).crs()
+    print "\nImage CRS :%s\n dem crs:%s" %(imgCrs.description(), demCrs.description())
 
-    if QgsRasterLayer(dem).crs() != imgCrs:
+    if demCrs != imgCrs:
         print "\nreprojecting DEM to %s" %(imgCrs.description())
-        #TODO: reproject DEM
+        ldem=QgsRasterLayer(dem)
+        extdem="%f,%f,%f,%f" %(ldem.extent().xMinimum(),\
+                ldem.extent().xMaximum(),\
+                ldem.extent().yMinimum(),\
+                ldem.extent().yMaximum())
+        crsStr=imgCrs.authid()
+        newdem=p.runalg("gdalogr:warpreproject",ldem,"",crsStr,"",30,0,False,extdem,"",5,4,75,6,1,False,0,False,"",None)
+#        LnDem=QgsRasterLayer(newdem['OUTPUT'])
+#        if LnDem.isValid():
+#            print "dem reprojected correctly"
+#            dem=newdem['OUTPUT']
     else:
         print "\nall files are in the same CRS!"
      
@@ -154,30 +148,27 @@ def correct(ipat):
      # count number of bands and create list of names
     brange=range(1,orImg.bandCount()+1)
     blist=["band"+str(x) for x in brange]
-
-    # get coordinates
-    extImg="%f,%f,%f,%f" %(orImg.extent().xMinimum(),\
-        orImg.extent().xMaximum(),\
-        orImg.extent().yMinimum(),\
-        orImg.extent().yMaximum())
-
-    try:
-        bPatDic
-    except NameError:
-        bPatDic={}
-    if len(bPatDic) == 0:
-        #create dictionary to hold band names and path
-        bPatDic={}
-        for i in brange:
-            #name of band
-            bname=blist[i-1]
-            bstr="-b "+str(i)
-            #save raster in temp folder
-            print "saving %s" %(bname)
-            tband=p.runalg("gdalogr:translate",orImg,100,True,"",0,"",extImg,False,6,4,75,6,1,False,0,False,bstr,None)
-            if QgsRasterLayer(tband['OUTPUT']).isValid():
-                print "layer %s is valid" %bname
-                bPatDic[bname]=tband['OUTPUT']
+    
+    #Function to open file in Gdal and export single band
+    def expBand(rast,i):
+        #band name and path
+        bname="band"+str(i)
+        directory=temp1+"/"+baseName
+        path=directory+"/"+bname+".tif"
+        if not QgsRasterLayer(path).isValid():
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+    #        call to gdal translate with option
+                gdal.Translate(path, rast, bandList=[i])
+                if not QgsRasterLayer(path).isValid():
+                    print "problem saving single band %s" %(i)          
+                else:
+                    print "band %s saved in %s" %(i, path)
+                    return bname,path
+#call to function
+    bPatDic={}
+    for i in brange:
+        bPatDic["band"+str(i)]=expBand(ipat, i)
 
     #### 3 Athmospheric correction
 
@@ -185,21 +176,18 @@ def correct(ipat):
     # preparation parameters for 6S 
     #For second line
     #read end of basename for date and time
-    dateS=baseName[11:26]
+    dateS=baseName.split("_")[2]
 
-    year=dateS[0:4]
     month=dateS[4:6]
     day=dateS[6:8]
 
     hours=dateS[9:11]
     minutes=dateS[11:13]
-    seconds=dateS[13:15]
     # hours and day in decimal time
     dmin=round(100*float(minutes)/60,0)
-
     dtime=str(hours)+"."+str(dmin/100)[2:]
 
-    #long lat (centre point)
+    #long lat (centre point) in WGS84
     long=orImg.extent().xMinimum()+((orImg.extent().xMaximum()-orImg.extent().xMinimum())/2)
     lat=orImg.extent().yMinimum()+((orImg.extent().yMaximum()-orImg.extent().yMinimum())/2)
     # transform long and lat in WGS 84
@@ -230,7 +218,7 @@ def correct(ipat):
         bRast=QgsRasterLayer(bPatDic[band])
         
         #path to parameter file
-        Spath=str(temp1+baseName+band+"atcorParam.txt")
+        Spath=str(temp1+"/"+baseName+"/"+band+"_.atcorParam.txt")
         Sfile=open(Spath, "w")
         #Writing paramater file
         #first line : satellite type
@@ -280,17 +268,17 @@ def correct(ipat):
         #minimum and maximum pixel value
         #range of values
         ds = gdal.Open(dem)
-	myarray = np.array(ds.GetRasterBand(1).ReadAsArray())
+        myarray = np.array(ds.GetRasterBand(1).ReadAsArray())
         pMin=np.nanmax(myarray)
         pMax=np.nanmin(myarray)
         pRange=str(pMin)+","+str(pMax)
-	print 'pixel range is %s' %(pRange)
+        print 'pixel range is %s' %(pRange)
         # launch athmospheric correction
         
-	print "launching athmospheric correction on image"+baseName[-10:]
+        print "launching athmospheric correction on image"+baseName[-10:]
         corrImg=p.runalg("grass7:i.atcorr",bRast,pRange,None, None,Spath,pRange,False,True,False,False,extImg,0,None)
         #corrImg2=p.runalg("gdalogr:translate",corrImg['output'],100,True,"",0,"",extImg,False,6,4,75,6,1,False,0,False,"",None)
-	if QgsRasterLayer(corrImg['output']).isValid:
+        if QgsRasterLayer(corrImg['output']).isValid:
 		print "athmospheric correction is valid"
         	corrDic[band]=corrImg['output']
 
@@ -352,12 +340,13 @@ def correct(ipat):
     return final['OUTPUT']
     
 #calling function
-
+#pool=Pool(4)
 #results=pool.map(correct, RlistNP)
-print RlistNP
-for ipat in RlistNP:
-    print ipat
-    res=correct(ipat)
+print "\n\n"+str(RlistNP)
+results=correct(RlistNP[0])
+#for ipat in RlistNP:
+#    print ipat
+#    res=correct(ipat)
     
     
     
@@ -404,10 +393,12 @@ timestr2=(
 logstr="Corrected images are available in %s" %(outd)
 logstr2="Script finished correctly at %s" %(timestr2)
 
-
+Lfile.write(logstr)
+Lfile.write(logstr2)
+Lfile.close()
 # When your script is complete, call exitQgis() to remove the provider and
 # layer registries from memory
-qgs.exitQgis()
+#Qgs.exitQgis()
 
 
 
