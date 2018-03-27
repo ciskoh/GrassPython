@@ -25,7 +25,7 @@ from multiprocessing import Pool
 import datetime
 import numpy as np
 from osgeo import gdal
-
+import shutil
 
 #----------------------------PARAMETERS
 #input directory
@@ -49,7 +49,7 @@ dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 #remote dir 
 outd="/home/jkm2/GIS/Sentinel_preprocess/test/output"
 # working folder for temporary folders
-temp1="/tmp"
+temp1="/home/jkm2/GIS/Sentinel_preprocess/test/WOD"
 #-------------------------------CODE---------------------------------
 
 ####LOG
@@ -118,6 +118,8 @@ def correct(ipat):
     orImg = QgsRasterLayer(ipat, baseName)
     if not orImg.isValid():
         print "\nLayer failed to load!"
+    #working folder for temp file
+    wod=temp1+"/"+baseName+"/"
     # image extension as string
     extImg="%f,%f,%f,%f" %(orImg.extent().xMinimum(),\
                 orImg.extent().xMaximum(),\
@@ -136,7 +138,7 @@ def correct(ipat):
                 ldem.extent().yMinimum(),\
                 ldem.extent().yMaximum())
         crsStr=imgCrs.authid()
-        newdem=p.runalg("gdalogr:warpreproject",ldem,"",crsStr,"",30,0,False,extdem,"",5,4,75,6,1,False,0,False,"",None)
+        newdem=p.runalg("gdalogr:warpreproject",ldem,"",crsStr,"",30,0,False,extdem,"",5,4,75,6,1,False,0,False,"",wod+"newdem.tif")
         LnDem=QgsRasterLayer(newdem['OUTPUT'])
         if LnDem.isValid():
             print "dem reprojected correctly"
@@ -169,8 +171,7 @@ def correct(ipat):
     for i in brange:
         tp=expBand(ipat, i)
 	bPatDic["band"+str(i)]=tp
-    print bPatDic
-
+    
     #### 3 Athmospheric correction
 
     #### create 6s parameters file for each band
@@ -198,12 +199,15 @@ def correct(ipat):
 
     # For seventh line (average altitude in km)
     #altitude average
-    demStats=p.runalg("grass7:r.univar",dem,None,"","",False,extImg,None)
-    statFile=open(demStats['output'], "r")
-    line=statFile.read().splitlines()[1]
+    #print "starting dem work"
+    #demStats=p.runalg("grass7:r.univar",dem,None,"","",False,extImg,wod+"demstats")
+    #statFile=open(demStats['output'], "r")
+    #line=statFile.read().splitlines()[1]
     #negative altitude average in km
-    avgDem=-1*float(line.split('|')[6])/1000
-
+    #avgDem=-1*float(line.split('|')[6])/1000
+    #simplified dem
+    avgDem=-1.400
+    print "finished dem work"
     #For eighth line (Sensor band)
     # band codes as dictionary
     bcodes=range(166, 179)
@@ -216,7 +220,8 @@ def correct(ipat):
     ####---- Loop through bands
     for i in brange:
         band="band"+str(i)
-        bRast=QgsRasterLayer(bPatDic[band])
+	bRastStr=bPatDic[band]
+        bRast=QgsRasterLayer(bRastStr)
 	if not bRast.isValid():
 		print "problem with raster band image to correct"
 		print "\n path to image is: %s" %(bPatDic[band])
@@ -272,23 +277,26 @@ def correct(ipat):
         Sfile.close()
         #minimum and maximum pixel value
         #range of values
-        ds = gdal.Open(dem)
+        ds = gdal.Open(bRastStr)
         myarray = np.array(ds.GetRasterBand(1).ReadAsArray())
-        pMin=np.nanmax(myarray)
-        pMax=np.nanmin(myarray)
+        pMax=np.nanmax(myarray)
+        pMin=np.nanmin(myarray)
         pRange=str(pMin)+","+str(pMax)
         print 'pixel range is %s' %(pRange)
-        # launch athmospheric correction
-        
-        print "launching athmospheric correction on image"+baseName[-10:]
-        corrImg=p.runalg("grass7:i.atcorr",bRast,pRange,None, None,Spath,pRange,False,True,False,False,extImg,0,None)
-        #corrImg2=p.runalg("gdalogr:translate",corrImg['output'],100,True,"",0,"",extImg,False,6,4,75,6,1,False,0,False,"",None)
-        if QgsRasterLayer(corrImg['output']).isValid:
-		print "athmospheric correction is valid"
-        	corrDic[band]=corrImg['output']
+        # launch athmospheric correction        
+        print "launching athmospheric correction on image %s and %s" %(baseName[-10:],band)
+        corPath=wod+"corrImg_"+band+".tif"
+        corrImg=p.runalg("grass7:i.atcorr",bRast,pRange,None, None,Spath,pRange,False,True,False,False,extImg,0,corPath)
+        if QgsRasterLayer(corPath).isValid():
+	    print "athmospheric correction is valid for %s" %band
+            corrDic[band]=corPath
+	else:
+	    print "problem correcting image %s. \n\n Quitting script" %corPath
+	    quit()
 
     # preparing list of inputs for topographic correction
-    inpList=[corrDic[x] for x in blist ]
+    inpList=corrDic.values()
+    print inpList
     #### TOPOGRAPHIC CORRECTION
     # preparation
     #calculating sun azimuth and zenith
@@ -334,37 +342,30 @@ def correct(ipat):
     outpath=os.path.join(outd,scId)
     if not os.path.exists(outpath):
         os.makedirs(outpath)
-
+    print "saving final file from images %s" %(str(inpList))
     outpath2=outpath+"/"+baseName+".tif"
     final=p.runalg("gdalogr:merge",inpList,False,True,6,outpath2)
-    print "final multilayer image is saved"
+    if QgsRasterLayer(outpath2).isValid():
+    	print "final multilayer image is saved"
+    else:
+        print "\n\n *** problem saving final image %s ***" %baseName
     #cleanup
     bPatDic={}
     corrDic={}
-    #remove corrected single bands 
-    clList=[corrDic[x] for x in blist ]
-    for y in clList:
-	os.path.remove(y)
-    # remove single bands
-    clList=[bPatDic[x] for x in blist ]
-    for z in clList:
-        os.path.remove(z)
-    print "all working files removed"
-	
+    #remove working files
+    shutil.rmtree(wod)
     
+    print "all working files removed"    
     return final['OUTPUT']
     
 #calling function in parallel mode
-pool=Pool(10)
+pool=Pool(20)
 results=pool.map(correct, RlistNP)
 
 ### procedural run
-print "\n\n"+str(RlistNP)
-results=correct(RlistNP[0])
-#for ipat in RlistNP:
-#    print ipat
-#    res=correct(ipat)
-# end of cycle
+#print "\n\n"+str(RlistNP)
+#for ipat in RlistNP[0:5]:
+#    results=correct(ipat)
 
 
 
@@ -392,7 +393,7 @@ print logstr
 print logstr2
 # When your script is complete, call exitQgis() to remove the provider and
 # layer registries from memory
-#Qgs.exitQgis()
+app.exitQgis()
 
 
 
