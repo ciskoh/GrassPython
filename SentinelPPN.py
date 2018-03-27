@@ -1,11 +1,6 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Mar 26 17:22:04 2018
-
-@author: matt
-"""
-
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 #----------------------------DESCRIPTION
 #Script to preprocess sentinel images and obtain ONLY NDVI values
 
@@ -15,8 +10,7 @@ import sys
 import os
 import qgis
 from qgis.core import *
-from PyQt4.QtGui import *
-
+#from PyQt4.QtGui import *
 
 app = QgsApplication([],True, None)
 app.setPrefixPath("/usr", True)
@@ -32,10 +26,11 @@ from multiprocessing import Pool
 import datetime
 import numpy as np
 from osgeo import gdal
+import shutil
 
 #----------------------------PARAMETERS
 #input directory
-# remote dir 
+# remote dir
 ind="/mnt/cephfs/data/BFH/Geodata/World/Sentinel-2/S2MSI1C/GeoTIFF"
 # local dir ind="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/input"
 #code of image tiles to be analysed
@@ -46,30 +41,46 @@ yea=[2016, 2017, 2018]
 
 #
 #path to Dem for topographic correction
-#remote 
+#remote
 dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 #local dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 
 # output directory
 #local dir outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
-#remote dir 
+#remote dir
 outd="/home/jkm2/GIS/Sentinel_preprocess/test/output"
 # working folder for temporary folders
-temp1="/tmp"
-#-------------------------------FUNCTIONS---------------------------------
+temp1="/home/jkm2/GIS/Sentinel_preprocess/test/WOD"
 
-#### 1 TRIGGER 
+#path to cloud mask
+clPath="/mnt/cephfs/data/BFH/Geodata/World/Sentinel-2/S2MSI1C/SAFE"
+
+#-------------------------------FUNCTIONS---------------------------------
+#100.1 Stop and go function based on user input
+#input lNum (INTEGER) - Line number
+#      baseName (STRING) - name of image being processed
+#output: either quit signal or nothing
+
+def stopGo(lNum, basename):
+    #prompt user signal
+    cont= raw_input("script at line %s, \n CONTINUE? Y/n?" %lNum)
+    if cont == "n":
+        print "stop signal received from user for image %s at line %s" %(baseName, lNum)
+        print "\n\n -->quitting script on user input"
+        quit()
+
+#### 1 TRIGGER
 
 #1.1 function to search for images recursively
 # Inputs:input iDir-folder empty list for root of images, tiles-code of tiles for area of interest)
 # Output: double list with name and path of images in iDir
 
 def srcImg(iDir, tiles):
-    multifolds1=(iDir +"/"+ tile for tile in tiles)
+    multifolds=(iDir +"/"+ tile for tile in tiles)
     bnlist=[]
     rlist=[]
     #search for tiff files in folder
-    for i in folds:
+    for i in multifolds:
         for r,d,files in os.walk(i):
             for f in files:
                 if f.endswith(".tif"):
@@ -82,7 +93,7 @@ def srcImg(iDir, tiles):
     return finlist
 
 #1.2 function to compare two lists and decide if the script continues
-#input two double (full path and basename) image lists, unprocessed and processed: 
+#input two double (full path and basename) image lists, unprocessed and processed:
 #Orlist- Non processed, Outlist - Processed images
 #Output: either a quit signal or a list of image to be processed
 
@@ -92,7 +103,7 @@ def checkLst(Orlist, Outlist):
     #if sublist is of length 0 exit right now
     if len(RlistNP) == 0:
         print "no image to correct.\n\n -->quitting script on trigger"
-        quit()
+        stopGo(106)
     else:
         logstr2= "\nfound %d unprocessed images" %(len(RlistNP))
         Lfile.write(logstr2)
@@ -105,21 +116,24 @@ def checkLst(Orlist, Outlist):
 
 #2 IMAGE METADATA AND LAYER
 # input: ipat-path to unprocessed image
-# output: Dictionary with the following data: 
+# output: Dictionary with the following data:
 #{ key : value  : type }
 
 #  baseName : basename without extension : STRING
 #  orImg : Qgs layer of Image : LAYER
 #  extImg : Image extension : STRING
 #  imgCrs : reference system : CRSOBJECT
-#  
+#
 def imgMd(ipat):
-    
+    global baseName
+    global orImg
+    global extImg
+    global imgCrs
     baseName = os.path.basename(ipat)[0:-4]
     orImg = QgsRasterLayer(ipat, baseName)
     if not orImg.isValid():
         print "\nLayer failed to load!\n\n -->quitting script on image %s" % baseName
-        quit()
+        stopGo(106, baseName)
     # image extension as string
     extImg="%f,%f,%f,%f" %(orImg.extent().xMinimum(),\
         orImg.extent().xMaximum(),\
@@ -133,6 +147,7 @@ def imgMd(ipat):
     mdImg["orImg"]=orImg
     mdImg["extImg"]=extImg
     mdImg["imgCrs"]=imgCrs
+    
     print "output of function 2 imgMd:\n\n %s" %str(mdImg)
     return mdImg
 
@@ -143,19 +158,19 @@ def imgMd(ipat):
 # output : path to this image working directory (STRING)
 
 def makeWod(baseName, temp1):
-    directory=temp1+"/"+baseName
+    directory=temp1+"/"+baseName+"/"
     if not os.path.exists(directory):
         os.makedirs(directory)
         print "output of function 2.1 makeWod, %s" %directory
     return directory
-    
+
 #3 DEM RESOLUTION CHECK AND TRANSFORM
-#input: dem (STRING) - path to DEM, 
-#      imgCrs (CRSOBJECT) - Reference system of Image to be corrected, 
+#input: dem (STRING) - path to DEM,
+#      imgCrs (CRSOBJECT) - Reference system of Image to be corrected,
 #      wod (STRING) - path to working directory
-    
-#output: dem - path to new reprojected layer 
-def demCheck(dem, ImgCrs, wod ):
+
+#output: dem - path to new reprojected layer
+def demCheck(dem, imgCrs, wod ):
     demCrs=QgsRasterLayer(dem).crs()
     print "\nImage CRS :%s\n dem crs:%s" %(imgCrs.description(), demCrs.description())
 
@@ -174,27 +189,28 @@ def demCheck(dem, ImgCrs, wod ):
             dem=newdem['OUTPUT']
             print "output of function 3 demCheck:\n\n %s" %dem
     else:
-        print "\nall files are in the same CRS!"    
+        print "\nall files are in the same CRS!"
     return dem
-    
+
 #4 BAND SEPARATION
-# inputs: ipat (STRING) - path to multiband image to be processed, 
+# inputs: ipat (STRING) - path to multiband image to be processed,
 #         bNum (INTEGER) - number of band to be extracted
-#         wod (STRING) - working directory to save geoTiff files    
-         
+#         baseName (STRING) : name of image to be processed
+#         wod (STRING) - working directory to save geoTiff files
+
 # output: path to single-band geotiff
-    
-def bndSep(ipat, bNum, wod):
+
+def bndSep(ipat, bNum, baseName, wod):
     sBand={}
     #band name and path
     bname="band"+str(bNum)
     directory=wod
-    path=directory+"/"+bname+".tif"
+    path=directory+bname+".tif"
     # call to gdal translate with option
-    gdal.Translate(path, ipat, bandList=[i])
+    gdal.Translate(path, ipat, bandList=[bNum])
     if not QgsRasterLayer(path).isValid():
-        print "problem saving single band %s!\n\n -->quitting script on image %s, function bndSep" %(i,baseName)          
-        quit()
+        print "problem saving single band %s!\n\n -->quitting script on image %s, function bndSep" %(bNum,baseName)
+        stopGo(209,baseName)
     print " output of function 4 bndSep:\n\n %s" %path
     return path
 
@@ -204,19 +220,20 @@ def bndSep(ipat, bNum, wod):
 #    line=statFile.read().splitlines()[1]
 
 #### 5 PARAMETERS FOR S6 ATHMOSPHERIC CORRECTION
-# input: baseName (STRING) - name of image to be processed
+# input: orImg (QGSLAYER) - layer of multiband unprocessed image
+#        baseName (STRING) - name of image to be processed
 #        bNum (INTEGER) - number of band to be used
-#        wod (STRING) - working directory to save geoTiff files    
+#        wod (STRING) - working directory to save geoTiff files
 # output: (STRING) path to parameter file
-def makePar(baseName, bNum, wod):
-    
-    # preparation parameters for 6S 
+def makePar(orImg, baseName, bNum, wod):
+
+    # preparation parameters for 6S
     #path to parameter file
     band="band"+str(bNum)
     Spath=str(wod+band+"_.atcorParam.txt")
-    #Writing paramater file    
+    #Writing paramater file
     Sfile=open(Spath, "w")
-    
+
     #FIRST LINE : satellite type
     firstLine="25\n"
     Sfile.write(firstLine)
@@ -234,17 +251,17 @@ def makePar(baseName, bNum, wod):
     dtime=str(hours)+"."+str(dmin/100)[2:]
 
     #long lat (centre point) in WGS84
-    long=orImg.extent().xMinimum()+((orImg.extent().xMaximum()-orImg.extent().xMinimum())/2)
+    lon=orImg.extent().xMinimum()+((orImg.extent().xMaximum()-orImg.extent().xMinimum())/2)
     lat=orImg.extent().yMinimum()+((orImg.extent().yMaximum()-orImg.extent().yMinimum())/2)
     # transform long and lat in WGS 84
     crsDest=QgsCoordinateReferenceSystem(4326)
     xform = QgsCoordinateTransform(orImg.crs(), crsDest)
-    ncoord=xform.transform(QgsPoint(long,lat))
-    
+    ncoord=xform.transform(QgsPoint(lon,lat))
+
     #print secondline
     secondLine=str(month)+" "+str(day)+" "+str(dtime)+" "+str(ncoord.x())+" "+str(ncoord.y())+"\n"
     Sfile.write(secondLine)
-        
+
     #THIRD LINE of parameter file athmospheric model (1) continental
     if month < 3 or month > 10:
         atmMod=3
@@ -253,15 +270,15 @@ def makePar(baseName, bNum, wod):
     thirdLine="%s \n" %atmMod
     #print third line
     Sfile.write(thirdLine)
-    
+
     #FOURTH LINE: 1 continental model
     fourthLine="1\n"
     Sfile.write(fourthLine)
-    
+
     #FIFTH LINE: Aerosol concentration model (visibility)
     fifthLine="-1\n"
     Sfile.write(fifthLine)
-    
+
     #SIXTH LINE: Aerosol concentration model (visibility)
     sixthLine="0\n"
     Sfile.write(sixthLine)
@@ -275,14 +292,14 @@ def makePar(baseName, bNum, wod):
     # EIGHTH LINE: sensor altitude
     eighthLine="-1000\n"
     Sfile.write(eighthLine)
-    
+
     # F : sensor band code
     bcodes=range(166, 179)
     ninthLine=str(bcodes[bNum-1])+"\n"
     Sfile.write(ninthLine)
-    
+
     #output
-    Sfile.close() 
+    Sfile.close()
     print "output of function 5 makePar is:\n\n"
     print "1st line of 6S parameter file (SATELLITE TYPE) is %s\n" %firstLine
     print "2nd line of 6S parameter file is (month, day, hh.ddd, long, lat):\n %s" %secondLine
@@ -298,12 +315,12 @@ def makePar(baseName, bNum, wod):
 #        wod (STRING) - path to working directory
 
 # output: STRING range of pixel values per band
-def pixRange(singImg, wod):    
+def pixRange(singImg, wod):
     #range of values
     ds = gdal.Open(dem)
     myarray = np.array(ds.GetRasterBand(1).ReadAsArray())
-    pMin=np.nanmax(myarray)
-    pMax=np.nanmin(myarray)
+    pMin=np.nanmin(myarray)
+    pMax=np.nanmax(myarray)
     pRange=str(pMin)+","+str(pMax)
     print "output of function 5.1 pixRange is:"
     print 'pixel range is %s' %(pRange)
@@ -315,15 +332,15 @@ def pixRange(singImg, wod):
 #       par (STRING) - path to parameter file
 #       pRange (STRING) - range of pixel values
 #       bNum (INTEGER) - band number
-#       extImg (STRING) - Image extension 
+#       extImg (STRING) - Image extension
 #       wod (STRING) - path to working directory
 
-#output: (STRING) path to single band corrected image       
+#output: (STRING) path to single band corrected image
 def atCorr(singImg, baseName, par, pRange, bNum, extImg, wod):
     # double check of input files
     if not QgsRasterLayer(singImg).isValid():
         print "problem with input image before atmospheric correction!\n\n -->quitting script on image %s" % baseName
-        quit()
+        stopGo(338, baseName)
     print "launching athmospheric correction on image "+baseName[-10:]
     #path to corrected image
     bname="band"+str(bNum)
@@ -331,15 +348,15 @@ def atCorr(singImg, baseName, par, pRange, bNum, extImg, wod):
     corrImg=p.runalg("grass7:i.atcorr",singImg,pRange,None, None,par,pRange,False,True,False,False,extImg,0,corPath)
     if not QgsRasterLayer(corPath).isValid():
         print "problem correcting the image!\n\n -->quitting script on image %s" % baseName
-        quit()
+        stopGo(346, baseName)
     if corrImg['output'] != corPath:
         print "problem with corrected image location"
-    else:  
+    else:
         print "output of function 6 atCorr is: \n\n"
         print corPath
     return corPath
-    
-#TODO: vector mask
+
+
 
 #7 NDVI calculation
 #input: Red (STRING) - path to Red band
@@ -347,305 +364,221 @@ def atCorr(singImg, baseName, par, pRange, bNum, extImg, wod):
 #       wod (STRING) - path to working directory
 #output: path to NDVI image
 def ndCalc(Red, Nir, wod):
-    fStr=Nir+Red/Nir-Red
-    #gdal calc
-    
+    fStr="(B-A)/(B+A)"
+    ndPath=wod+"ndvi.tif"
+    nd=p.runalg("gdalogr:rastercalculator",Red,"1",Nir,"1",None,"1",None,"1",None,"1",None,"1",fStr,"",5,"",ndPath)
+    if not QgsRasterLayer(ndPath).isValid():
+        print "problem cerating NDVI!\n\n -->quitting script on image %s" % baseName
+        stopGo(367, baseName)
+    else:
+        print "output of function 7 ndCalc is: \n\n"
+        print ndPath
+    return ndPath
 
-#TODO output
-#TODO main function
+#8 vector mask to exclude clouds
+#input: img (STRING) - path to geotiff (NDVI in this case)
+#       clPath (STRING) - path to cloud masks main location
+#       baseName (STRING) - name of image being processed
+#       wod (STRING) - path to working directory
 
-#100.1 Stop and go function based on user input
-#input lNum (INTEGER) - Line number 
-#      baseName (STRING) - name of image being processed
-#output: either quit signal or nothing
+#output (STRING) -path to masked ndvi (clouds excluded)
+def clMask(img, clPath, baseName, wod):
+    # find path to cloudmask
+    year=baseName.split("_")[2][0:4]
+    tile=baseName.split("_")[5]
+    mainDir=os.path.join(clPath, tile, year, baseName+".SAFE")
+    msPath=wod+"cloudmask.tif"
+    if not os.path.exists(mainDir):
+        print "problem finding cloud mask folder"
+# look for cloudmask in remote folder
+    for r, d, files in os.walk(mainDir):
+        for f in files:
+            if f.endswith("B00.gml"):
+                clMpath=os.path.join(r,f)
+                #print "path to cloudmask is %s" %clMpath
+                #stopGo(394,baseName)
+    ms=p.runalg("grass7:r.mask.vect",clMpath,img,"","",True,extImg,0,-1,0.0001,msPath)
+    if not QgsRasterLayer(msPath).isValid():
+        print "problem masking image %s\n\n -->quitting script on function 8 clMask" %baseName
+        stopGo(395, baseName)
+    print "output of function 8 clMask is:\n %s" %msPath
+    return msPath
 
-def stopGo(lNum, basename):
-    cont=raw_input("script at line %s, \n CONTINUE? Y/n?" %lNum)
-    if cont == "n":
-        print "stop signal received from user for image %s at line %s" %(baseName, lNum)
-        print "\n\n -->quitting script on user input"
-        quit()
-    
-        
+
+#100.2 Save output in appropriate folder
+#input: Img (STRING) - Image to be saved
+#       baseName (STRING) - name of image being processed
+#       outd (STRING) - main output directory
+
+#output: STRING path to exported image
+def makeOut(Img, baseName, outd):
+    tile=baseName.split("_")[5]
+    outDir=os.path.join(outd, tile)
+    outPath=os.path.join(outDir, tile, baseName+".tif")
+    if not os.path.exists(outDir):
+        os.makedirs(outDir)
+    shutil.copyfile(Img, outPath)
+    if not QgsRasterLayer(outPath).isvalid():
+        print "problem saving final image %s\n\n -->quitting script on function 100.2 makeOut"
+        stopGo(415, baseName)
+    print "output of function 100.2 makeOut is:\n %s" %outPath
+    return outPath
+
+#100.3 clean temporary files
+#input : wod (STRING) - path to current image working directory
+#        baseName(STRING) - name of current image
+#output : none
+
+def cleanUp(wod, baseName):
+    shutil.rmtree(wod)
+    print "removed qorking files for image %s" %baseName
+
 # 100 MAIN FUNCTION to perfom athmospheric correction and NDVI calculation using all functions above
 #input : ipat (STRING) - path to image to be processed
 #        bnum ( LIST of integers) - band numbers to be processed
 #        outd (STRING) - path to output folder
 
 #output : string to final image (corrected and masked ndvi)
-
-
-
 def main(ipat):
-    
+
 ##   call function to get image metadata
-    mdDic=imgMD(ipat)
-    
+    mdDic=imgMd(ipat)
+
     #output should be dictionary
-    baseName=mdDic['baseName']
     
-    a=stopGO(378, baseName)
-    
+
     ## function to create working directory for this image
     wod=makeWod(baseName, temp1)
-    
+    print "wod is %s" %wod
     #output is working folder path
-    
+
     ## function to check for dem crs
-    
     #parameters
-    imgCrs=mdDic["imgCrs"]
+        
     global dem
     dem=demCheck(dem, imgCrs, wod)
-    
+
     #output is path to (new) dem
-    
-    a=stopGO(394, baseName)
-    ##------- RED IMAGE
+
+        ##------- RED IMAGE
     ## function to seprate multilayer image in single band (RED)
     bNum=4
-    Red=bndSep(ipat, bNum, wod)
+    Red=bndSep(ipat, bNum,baseName, wod)
     #output is path to RED band geotiff
-    
+
     ## function to create parameters for athm. corr. in single band image (RED)
-    redPar=makePar(baseName, bNum, wod)
-    
+    orImg=mdDic ["orImg"]
+    redPar=makePar(orImg, baseName, bNum, wod)
+
     ## function to calculate pixel range in band (RED)
     redRange=pixRange(Red, wod)
-    
+
     ## function to perform athm. corr. on single band image (RED)
     extImg=mdDic['extImg']
     redCor=atCorr(Red, baseName, redPar, redRange, bNum, extImg, wod )
-    
+
     # output should be path to corrected image (RED)
     print "corrected image is %s" %redCor
-    
-    a=stopGO(400, baseName)
-    
+
+#    stopGo(478, baseName)
+
     ###------- NIR IMAGE
     ## function to seprate multilayer image in single band (NIR)
     bNum=8
-    Nir=bndSep(ipat, bNum, wod)
+    Nir=bndSep(ipat, bNum, baseName, wod)
     #output is path to NIR band geotiff
-    
+
     ## function to create parameters for athm. corr. in single band image (NIR)
-    nirRPar=makePar(baseName, bNum, wod)
-    
+    nirPar=makePar(orImg, baseName, bNum, wod)
+
     ## function to calculate pixel range in band (NIR)
     nirRange=pixRange(Nir, wod)
-    
+
     ## function to perform athm. corr. on single band image (NIR)
     extImg=mdDic['extImg']
     nirCor=atCorr(Nir, baseName, nirPar, nirRange, bNum, extImg, wod )
-    
+
     print "corrected image is %s" %nirCor
     # output should be path to corrected image (NIR)
-    a=stopGO(400, baseName)
+#    stopGo(498, baseName)
+
+    ## Function to calculate NDVI
+    nd=ndCalc(redCor, nirCor, wod)
+    print "ndvi should be in %s" %nd
+    # output should be path to corrected image (NIR)
+#    stopGo(504, baseName)
+    ## function to mask ndvi using cloudmask of image
+    msNdvi=clMask(nd, clPath, baseName, wod)
     
-    #Function to calculate NDVI
+    stopGo(508, baseName)
     
-        
+    ##function to export final image (masked NDVI)
+    fin=makeOut(msNdvi, baseName, outd)
+    
+    #if working files are not needed anymore
+    clean=raw_input("should I delete working files? y/N")
+    if clean == "y":
+        cleanUp(wod, BaseName)
+    stopGo(514, baseName)
+
+    return fin
+
 #-------------------------------code---------------------------------
 
 #
 #####LOG
-#timestr=(
-#    '1{date:%Y-%m-%d %H:%M:%S}'.format( date=datetime.datetime.now() )
-#    )
-#    
-#logpath=outd+"/"+"log.txt"
-#Lfile=open(logpath, "w")
-#logtext= "\nAthmospheric correction using SentinelPreprocessing.py started at %s" %(timestr)
-#Lfile.write(logtext)
-#print logtext
-#
-##### 0- TRIGGER
-##TRIGGER to check if there are new images
-#
-###Search for images in input directory
-##function to search for images recursively
-## empty list with root
-#
-####Search in input directory
-#
-#Orlist=srcImg(multifolds1)
-###Search in output directory
-#
-#Outlist=srcImg(multifolds2)
-#####list of output images
+timestr=(
+    '1{date:%Y-%m-%d %H:%M:%S}'.format( date=datetime.datetime.now() )
+    )
+
+logpath=outd+"/"+"log.txt"
+Lfile=open(logpath, "w")
+logtext= "\nAthmospheric correction using SentinelPreprocessing.py started at %s" %(timestr)
+Lfile.write(logtext)
+print logtext
+
+#### 0- TRIGGER
+#TRIGGER to check if there are new images
+
+
+
+###Search in input directory
+
+Orlist=srcImg(ind, tiles)
+##Search in output directory
+
+Outlist=srcImg(outd, tiles)
 ## get sublist of missing/non processed images
-#
-#RlistNP=[y for y in Orlist[1] if os.path.basename(y) not in Outlist[0]]
-#
-##if sublist is of length 0 exit right now
-#
-#
-## get path of image
-#    # import image
-##calling process as function
-#def correct(ipat):
-#    # use global variables
-#    global dem
-#    global outd
-#    global temp
-#    #get baseName
-#  
-#    #### 3 Athmospheric correction
-## paramters
-#
-#    # For seventh line (average altitude in km)
-#    #altitude average
-#    demStats=p.runalg("grass7:r.univar",dem,None,"","",False,extImg,None)
-#    statFile=open(demStats['output'], "r")
-#    line=statFile.read().splitlines()[1]
-#    #negative altitude average in km
-#    avgDem=-1*float(line.split('|')[6])/1000
-#
-#    #For eighth line (Sensor band)
-#    # band codes as dictionary
-#    bcodes=range(166, 179)
-#
-#    try:
-#        corrDic
-#    except NameError:
-#        corrDic={}
-#            
-#    ####---- Loop through bands
-#    for i in brange:
-#        band="band"+str(i)
-#        bRast=QgsRasterLayer(bPatDic[band])
-#    if not bRast.isValid():
-#        print "problem with raster band image to correct"
-#        print "\n path to image is: %s" %(bPatDic[band])
-#        quit()
-#        
-#     
-#
-#        
-#        
-#
-#        
-#
-#        
-#        
-#        
-#        
-#        # launch athmospheric correction
-#        
-#        print "launching athmospheric correction on image"+baseName[-10:]
-#        corrImg=p.runalg("grass7:i.atcorr",bRast,pRange,None, None,Spath,pRange,False,True,False,False,extImg,0,None)
-#        #corrImg2=p.runalg("gdalogr:translate",corrImg['output'],100,True,"",0,"",extImg,False,6,4,75,6,1,False,0,False,"",None)
-#        if QgsRasterLayer(corrImg['output']).isValid:
-#        print "athmospheric correction is valid"
-#            corrDic[band]=corrImg['output']
-#
-#    # preparing list of inputs for topographic correction
-#    inpList=[corrDic[x] for x in blist ]
-#    #### TOPOGRAPHIC CORRECTION
-#    # preparation
-#    #calculating sun azimuth and zenith
-#
-#    #sunMod= p.runalg("grass7:r.sunhours",year,month,day,hours,minutes,seconds,"","",False,False,extImg,0,None,None,None)
-#    #
-#    ##function to extract minimum value from metadata
-#    #def getMin(rast):
-#    #    layer=QgsRasterLayer(rast).metadata()
-#    #    text1=layer.split("STATISTICS_MINIMUM")[1]
-#    #    text2=text1.split("</p")[0][1:]
-#    #    return float(text2)
-#    #    
-#    ##calling function on results of Sun Mod
-#    #elevation=getMin(sunMod['elevation'])
-#    #zenith=90-elevation
-#    #azimuth=getMin(sunMod['azimuth'])
-#    ##illumination model
-#    #ilMod=p.runalg("grass7:i.topo.coor.ill",dem,elevation,azimuth,extImg,0,None)
-#
-#
-#    ##actual topographic correction
-#    #topocorr=p.runalg("grass7:i.topo.corr",inpList,ilMod['output'],zenith,0,False,extImg,None)
-#    #
-#    ##extracting path to topo corrected tif files
-#    #topocList=[]
-#    #for r,d,files in os.walk(topocorr['output']):
-#    #        for f in files:
-#    #            if f.endswith(".tif"):
-#    #                topocList.append(os.path.join(r,f))
-#    #
-#    ##verify topographically corrected files
-#    #for i in topocList:
-#    #    if not QgsRasterLayer(i).isValid():
-#    #        print "problem with topographically corrected files"
-#    #    else:
-#    #        print " all bands have been topographically corrected"
-#
-#
-#    #Exporting Images
-#    #scene idnetifier for folder
-#    scId=baseName.split("_")[5]
-#    outpath=os.path.join(outd,scId)
-#    if not os.path.exists(outpath):
-#        os.makedirs(outpath)
-#
-#    outpath2=outpath+"/"+baseName+".tif"
-#    final=p.runalg("gdalogr:merge",inpList,False,True,6,outpath2)
-#    print "final multilayer image is saved"
-#    #cleanup
-#    bPatDic={}
-#    corrDic={}
-#    #remove corrected single bands 
-#    clList=[corrDic[x] for x in blist ]
-#    for y in clList:
-#    os.path.remove(y)
-#    # remove single bands
-#    clList=[bPatDic[x] for x in blist ]
-#    for z in clList:
-#        os.path.remove(z)
-#    print "all working files removed"
-#    
-#    
-#    return final['OUTPUT']
-#    
-##calling function in parallel mode
-#pool=Pool(10)
-#results=pool.map(correct, RlistNP)
-#
-#### procedural run
-#print "\n\n"+str(RlistNP)
-#results=correct(RlistNP[0])
-##for ipat in RlistNP:
-##    print ipat
-##    res=correct(ipat)
-## end of cycle
-#
-#
-#
-#### 7 write logfile
-#
-## add script name
-#
-## add date and time
-#
-## add number of images
-#
-##8 Clean up
+RlistNP=checkLst(Orlist, Outlist)
+
+#sort list from most recent image
+#procedural run of main function
+res=main(RlistNP[0])
+
+#Parallel run of main function
+
+#pool=Pool(1)
+#res=pool.map(main,RlistNP)
+
+
 ##Log conclude
-#timestr2=(
-#    '1{date:%Y-%m-%d %H:%M:%S}'.format( date=datetime.datetime.now() )
-#    )
-#    
-#logstr="Corrected images are available in %s" %(outd)
-#logstr2="Script finished correctly at %s" %(timestr2)
-#
-#Lfile.write(logstr)
-#Lfile.write(logstr2)
-#Lfile.close()
-#print logstr
-#print logstr2
-## When your script is complete, call exitQgis() to remove the provider and
-## layer registries from memory
-##Qgs.exitQgis()
-#
+timestr2=(
+    '1{date:%Y-%m-%d %H:%M:%S}'.format( date=datetime.datetime.now() )
+    )
+
+logstr="Corrected images are available in %s" %(outd)
+logstr2="Script finished correctly at %s" %(timestr2)
+
+Lfile.write(logstr)
+Lfile.write(logstr2)
+Lfile.close()
+print logstr
+print logstr2
+
+# When your script is complete, call exitQgis() to remove the provider and
+# layer registries from memory
+app.exitQgis()
+
 #
 
 
