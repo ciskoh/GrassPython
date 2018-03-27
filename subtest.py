@@ -111,7 +111,7 @@ extdem="%f,%f,%f,%f" %(ldem.extent().xMinimum(),\
     ldem.extent().yMaximum())
     
 if ldem.crs() != QgsCoordinateReferenceSystem(ref):
-    newdem=p.runalg("gdalogr:warpreproject",dem,"",crefstr,"",utmPix,0,False,extdem,"",5,4,75,6,1,False,0,False,"",None)
+    newdem=p.runalg("gdalogr:warpreproject",ldem,ldem.crs().authId(),crefstr,"",utmPix,0,False,extdem,"",5,4,75,6,1,False,0,False,"",None)
     
     if not QgsRasterLayer(newdem['OUTPUT']).isValid():
         print "DEM layer transformation not valid"
