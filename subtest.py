@@ -29,7 +29,7 @@ slolist=["Flat","Gently sloping" ,"Sloping", "Steep", "Very steep"]
 minar=20000
 
 ### Pixel resolution in meters
-utmPix=30
+utmPix=10
 
 #Method for generalisation
 meth=2
@@ -50,13 +50,14 @@ from shutil import copyfile
 import time
 # 0 Preprocessing
 # creating output directory
-directory=wod+"/lscMap-script"
+
+directory=wod+"/lscMap-script_"+str(utmPix)
 dirPart=directory+"/workingFiles"
 dirFin=directory+"/finalOutput"
 if not os.path.exists(directory):
     os.makedirs(directory)
-os.makedirs(dirPart)
-os.makedirs(dirFin)
+    os.makedirs(dirPart)
+    os.makedirs(dirFin)
 
 # 0.1 Importing files
 
@@ -111,7 +112,7 @@ extdem="%f,%f,%f,%f" %(ldem.extent().xMinimum(),\
     ldem.extent().yMaximum())
     
 if ldem.crs() != QgsCoordinateReferenceSystem(ref):
-    newdem=p.runalg("gdalogr:warpreproject",ldem,ldem.crs().authId(),crefstr,"",utmPix,0,False,extdem,"",5,4,75,6,1,False,0,False,"",None)
+    newdem=p.runalg("gdalogr:warpreproject",ldem,ldem.crs().authid(),crefstr,"",utmPix,0,False,extdem,"",5,4,75,6,1,False,0,False,"",None)
     
     if not QgsRasterLayer(newdem['OUTPUT']).isValid():
         print "DEM layer transformation not valid"
@@ -244,8 +245,8 @@ def simp(rawrast):
     
         #sieve to remove small patches
         b=p.runalg("gdalogr:sieve", a['output'], minpix**2, 0, None)
-       
-        return b
+        
+        return b['output']
 
 
 ##call function to aspect
@@ -273,7 +274,7 @@ if QgsRasterLayer(lsc_unit['OUTPUT']).isValid():
 
 ### 7 translating raster to vector
 
-lsc_vect=p.runalg("gdalogr:polygonize",lsc_unit_simp['OUTPUT'],"code",None)
+lsc_vect=p.runalg("gdalogr:polygonize",lsc_unit_simp,"code",None)
 
 #add attributes "land use", "slope", "aspect", "area"
 vect = QgsVectorLayer(lsc_vect['OUTPUT'], "lsc vector", "ogr")
@@ -327,7 +328,7 @@ layer.commitChanges()
 QgsVectorFileWriter.writeAsVectorFormat(layer, dirFin+'/lsc_map.shp', "", None, "ESRI Shapefile")
 
 # exporting raster map
-copyfile(lsc_unit_simp['OUTPUT'], dirFin+"/lsc_map.tif")
+copyfile(lsc_unit_simp, dirFin+"/lsc_map.tif")
 
 
 #exporting source files

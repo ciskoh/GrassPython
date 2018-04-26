@@ -48,7 +48,7 @@ dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 # output directory
 #local dir outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
 #remote dir
-outd="/home/jkm2/GIS/Sentinel_preprocess/test/output"
+outd="/home/jkm2/GIS/Sentinel_preprocess/test/ndvi_output"
 # working folder for temporary folders
 temp1="/home/jkm2/GIS/Sentinel_preprocess/test/WOD"
 
@@ -103,7 +103,7 @@ def checkLst(Orlist, Outlist):
     #if sublist is of length 0 exit right now
     if len(RlistNP) == 0:
         print "no image to correct.\n\n -->quitting script on trigger"
-        stopGo(106)
+        quit()
     else:
         logstr2= "\nfound %d unprocessed images" %(len(RlistNP))
         Lfile.write(logstr2)
@@ -210,7 +210,7 @@ def bndSep(ipat, bNum, baseName, wod):
     gdal.Translate(path, ipat, bandList=[bNum])
     if not QgsRasterLayer(path).isValid():
         print "problem saving single band %s!\n\n -->quitting script on image %s, function bndSep" %(bNum,baseName)
-        stopGo(209,baseName)
+        quit()
     print " output of function 4 bndSep:\n\n %s" %path
     return path
 
@@ -317,13 +317,14 @@ def makePar(orImg, baseName, bNum, wod):
 # output: STRING range of pixel values per band
 def pixRange(singImg, wod):
     #range of values
-    ds = gdal.Open(dem)
+    ds = gdal.Open(singImg)
     myarray = np.array(ds.GetRasterBand(1).ReadAsArray())
     pMin=np.nanmin(myarray)
     pMax=np.nanmax(myarray)
     pRange=str(pMin)+","+str(pMax)
     print "output of function 5.1 pixRange is:"
     print 'pixel range is %s' %(pRange)
+    ds=None
     return pRange
 
 #6 Athmospheric correction
@@ -340,7 +341,7 @@ def atCorr(singImg, baseName, par, pRange, bNum, extImg, wod):
     # double check of input files
     if not QgsRasterLayer(singImg).isValid():
         print "problem with input image before atmospheric correction!\n\n -->quitting script on image %s" % baseName
-        stopGo(338, baseName)
+        #stopGo(338, baseName)
     print "launching athmospheric correction on image "+baseName[-10:]
     #path to corrected image
     bname="band"+str(bNum)
@@ -348,7 +349,7 @@ def atCorr(singImg, baseName, par, pRange, bNum, extImg, wod):
     corrImg=p.runalg("grass7:i.atcorr",singImg,pRange,None, None,par,pRange,False,True,False,False,extImg,0,corPath)
     if not QgsRasterLayer(corPath).isValid():
         print "problem correcting the image!\n\n -->quitting script on image %s" % baseName
-        stopGo(346, baseName)
+        #stopGo(346, baseName)
     if corrImg['output'] != corPath:
         print "problem with corrected image location"
     else:
@@ -369,7 +370,7 @@ def ndCalc(Red, Nir, wod):
     nd=p.runalg("gdalogr:rastercalculator",Red,"1",Nir,"1",None,"1",None,"1",None,"1",None,"1",fStr,"",5,"",ndPath)
     if not QgsRasterLayer(ndPath).isValid():
         print "problem cerating NDVI!\n\n -->quitting script on image %s" % baseName
-        stopGo(367, baseName)
+        #stopGo(367, baseName)
     else:
         print "output of function 7 ndCalc is: \n\n"
         print ndPath
@@ -395,12 +396,16 @@ def clMask(img, clPath, baseName, wod):
         for f in files:
             if f.endswith("B00.gml"):
                 clMpath=os.path.join(r,f)
-                #print "path to cloudmask is %s" %clMpath
-                #stopGo(394,baseName)
-    ms=p.runalg("grass7:r.mask.vect",clMpath,img,"","",True,extImg,0,-1,0.0001,msPath)
+    cpv=wod+"cloudVec.gml"
+    shutil.copy2(clMpath, cpv)
+    lay=QgsVectorLayer(cpv)
+    #stopGo(401,baseName)
+    
+    ms=p.runalg("grass7:r.mask.vect",cpv,img,"","",True,extImg,0,-1,0.0001,msPath)
     if not QgsRasterLayer(msPath).isValid():
-        print "problem masking image %s\n\n -->quitting script on function 8 clMask" %baseName
-        stopGo(395, baseName)
+        print "problem masking image %s function 8 clMask" %baseName
+        msPath=img
+        	#stopGo(395, baseName)
     print "output of function 8 clMask is:\n %s" %msPath
     return msPath
 
@@ -412,15 +417,18 @@ def clMask(img, clPath, baseName, wod):
 
 #output: STRING path to exported image
 def makeOut(Img, baseName, outd):
+    print "starting makeOut"
     tile=baseName.split("_")[5]
     outDir=os.path.join(outd, tile)
-    outPath=os.path.join(outDir, tile, baseName+".tif")
+    outPath=os.path.join(outDir, baseName+".tif")
     if not os.path.exists(outDir):
         os.makedirs(outDir)
-    shutil.copyfile(Img, outPath)
-    if not QgsRasterLayer(outPath).isvalid():
+
+    shutil.copy2(Img, outPath)
+    if not QgsRasterLayer(outPath).isValid():
         print "problem saving final image %s\n\n -->quitting script on function 100.2 makeOut"
-        stopGo(415, baseName)
+        #stopGo(415, baseName)
+        
     print "output of function 100.2 makeOut is:\n %s" %outPath
     return outPath
 
@@ -431,7 +439,7 @@ def makeOut(Img, baseName, outd):
 
 def cleanUp(wod, baseName):
     shutil.rmtree(wod)
-    print "removed qorking files for image %s" %baseName
+    print "removed working files for image %s" %baseName
 
 # 100 MAIN FUNCTION to perfom athmospheric correction and NDVI calculation using all functions above
 #input : ipat (STRING) - path to image to be processed
@@ -440,7 +448,7 @@ def cleanUp(wod, baseName):
 
 #output : string to final image (corrected and masked ndvi)
 def main(ipat):
-
+    print "\n\n***START PROCESSING IMAGE: %s***" %os.path.basename(ipat)
 ##   call function to get image metadata
     mdDic=imgMd(ipat)
 
@@ -507,19 +515,21 @@ def main(ipat):
     print "ndvi should be in %s" %nd
     # output should be path to corrected image (NIR)
 #    stopGo(504, baseName)
+
     ## function to mask ndvi using cloudmask of image
-    msNdvi=clMask(nd, clPath, baseName, wod)
+    #TODO:  not working
+    #msNdvi=clMask(nd, clPath, baseName, wod)
     
-    stopGo(508, baseName)
+    #stopGo(508, baseName)
     
     ##function to export final image (masked NDVI)
-    fin=makeOut(msNdvi, baseName, outd)
+    fin=makeOut(nd, baseName, outd)
     
     #if working files are not needed anymore
-    clean=raw_input("should I delete working files? y/N")
-    if clean == "y":
-        cleanUp(wod, BaseName)
-    stopGo(514, baseName)
+    
+    #cleanUp(wod, baseName)
+
+    #stopGo(514, baseName)
 
     return fin
 
@@ -553,11 +563,12 @@ RlistNP=checkLst(Orlist, Outlist)
 
 #sort list from most recent image
 #procedural run of main function
-res=main(RlistNP[0])
+for ipat in RlistNP:
+    res=main(ipat)
 
 #Parallel run of main function
 
-#pool=Pool(1)
+##pool=Pool(44)
 #res=pool.map(main,RlistNP)
 
 
