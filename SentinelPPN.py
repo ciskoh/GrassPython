@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 #----------------------------DESCRIPTION
-#Script to preprocess sentinel images and obtain ONLY NDVI values
+#Script to preprocess sentinel images and obtain ONLY NDVI /SAVI / MSAVI values
 
 #------------------------------SETTINGS-------------------------
 # Prepare the environment
@@ -587,8 +587,6 @@ print logtext
 
 #### 0- TRIGGER
 #TRIGGER to check if there are new images
-
-
 
 ###Search in input directory
 
