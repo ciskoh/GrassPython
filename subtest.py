@@ -1,25 +1,26 @@
 #!/usr/bin/python
 #Script to create landscape unit map using land use and land cover raster
-
+#CONFIGURATION: FAO land cover map 
 #-----------------------PARAMETERS------------------------------------------
 #### ALTERNATIVE PATH TO INPUT FILES FOR TESTING
 dem="/home/jkm2/GIS/DEM/complete_dem_Filled.tif"
-lu="/home/jkm2/GIS/land cover/LandCover_updated/Land_cover_updated.tif"
+lu="/home/jkm2/GIS/land cover/FAO/LandCoverFAO_30.tif"
 
-#Output directory
+#Output directory location & name
 wod="/home/jkm2/GIS/Analysis/"
+wodName="Lsc_Map_FAO"
 
 #crs of utm zone
 ref=32630
 #### Land use categories
 
-lulist=["Grassland", "Open shrubland", "Dense shrubland", "Open forest", "Dense forest", "Agriculture"]
+lulist=["Irrig. agriculture", "Dry agriculture", "Steppa", "Open shrubland", "Open forest", "Dense forest"]
 
 
 
 #### ASPECT PARAMETERS and category names
-asrul="0 thru 45 = 1 north\n315 thru 360 = 1 north\n45 thru 135 = 2 east\n135 thru 225 = 3 south\n225 thru 315 = 4 west\n\n"
-asplist=["Flat", "North", "East", "South", "West"]
+asrul="0 thru 90 = 1 north\n270 thru 360 = 1 north\n90 thru 270 = 2 east"
+asplist=["North", "South"]
 
 #### SLOPE PARAMETERS
 slorul="0 thru 10 = 1 flat\n10 thru 15 = 2 sloping\n15 thru 30 = 3 steep\n30 thru 100 = 4 very steep"
@@ -29,10 +30,10 @@ slolist=["Flat","Gently sloping" ,"Sloping", "Steep", "Very steep"]
 minar=20000
 
 ### Pixel resolution in meters
-utmPix=10
+utmPix=30
 
 #Method for generalisation
-meth=2
+meth=3
 #options: 0 -average, 2 -median,3 -mode, 4 -minimum, 5 -maximum,
 # 5 -range, 7 -stddev, 8 -sum, 9 -count, 10 -variance, 11 -diversity,
 # 12 -interspersion, 13 -quart1, 14 -quart3, 
@@ -51,7 +52,7 @@ import time
 # 0 Preprocessing
 # creating output directory
 
-directory=wod+"/lscMap-script_"+str(utmPix)
+directory=wod+wodName+str(utmPix)
 dirPart=directory+"/workingFiles"
 dirFin=directory+"/finalOutput"
 if not os.path.exists(directory):
@@ -200,6 +201,7 @@ sloclass=p.runalg("grass7:r.reclass",tempslo['OUTPUT'],"",slorul,extdem,0,None)
 newasp=p.runalg("gdalogr:rastercalculator",tempslo['OUTPUT'],"1",aspclass['output'],"1",None,"1",None,"1",None,"1",None,"1","0*(A<=5)+B*(A>5)","",5,"",None)
 newslo=p.runalg("gdalogr:rastercalculator",tempslo['OUTPUT'],"1",sloclass['output'],"1",None,"1",None,"1",None,"1",None,"1","0*(A<=5)+B*(A>5)","",5,"",None)
 
+
 #### 4 simplification
 print "resolution of rasters", utmPix
 print "minimum area in sq. meters", minar
@@ -216,37 +218,40 @@ print "size of area in pixels", minpix**2
 ## 5. function to simplify rasters 
 
 sizelist=[minpix, minpix+2, minpix+4]
-
+minHec=minar/10000
 def simp(rawrast):
-        
-        if isinstance(rawrast, dict):
-            rawRast=QgsRasterLayer(rawrast['OUTPUT'])
-        else:
-            rawRast=rawrast
-        neigh=list()
-        
-        # get extension of raster
-        coords="%f,%f,%f,%f" %(rawRast.extent().xMinimum(),\
-            rawRast.extent().xMaximum(),\
-            rawRast.extent().yMinimum(),\
-            rawRast.extent().yMaximum())
+    if isinstance(rawrast, dict):
+        rawRast=QgsRasterLayer(rawrast[rawrast.keys()[0]])
+    else:
+        rawRast=rawrast
     
-        for i in sizelist:
-            #calling command
-            n=p.runalg("grass7:r.neighbors", rawRast, meth, i, True, False, "", coords, 0, None)
-            #add  to list of rasters
-            # na=QgsRasterLayer(n['output'])
-            neigh.append(QgsRasterLayer(n['output']))
-
+    # get extension of raster
+    coords="%f,%f,%f,%f" %(rawRast.extent().xMinimum(),\
+        rawRast.extent().xMaximum(),\
+        rawRast.extent().yMinimum(),\
+        rawRast.extent().yMaximum())
+    # remove small areas    
+    rawRast2=p.runalg("grass7:r.reclass.area.greater",rawRast,0,minHec,coords,0,None)
+    rawRast=rawRast2[rawRast2.keys()[0]]
+        
+        
+    neigh=list()
+    neigh.append(rawRast)
+        
+            
+    for i in sizelist:
+        #calling command
+        n=p.runalg("grass7:r.neighbors", rawRast, meth, i, True, False, "", coords, 0, None)
+        #add to list of rasters
+        # na=QgsRasterLayer(n['output'])
+        neigh.append(QgsRasterLayer(n['output']))
+        
         #print neigh
 
-        #patch rasters to obtain generalized map
-        a=p.runalg("grass7:r.patch",list(reversed(neigh)),False,coords,0,None)
-    
-        #sieve to remove small patches
-        b=p.runalg("gdalogr:sieve", a['output'], minpix**2, 0, None)
+    #patch rasters to obtain generalized map
+    a=p.runalg("grass7:r.patch",neigh,False,coords,0,None)['output']
         
-        return b['output']
+    return a
 
 
 ##call function to aspect
@@ -260,17 +265,27 @@ simpslope=newslo['OUTPUT']
 print "slope is simplified"
 
 ##call function to land cover
-#simplu=simp(llu)['OUTPUT']
-simplu=llu
+#simplu=simp(llu.source())['OUTPUT']
+simplu=llu.source()
 print "land use is simplified"
-
+print(simplu)
+iface.addRasterLayer(simpasp, "simplified aspect")
+iface.addRasterLayer(simplu, "simplified land cover")
+iface.addRasterLayer(simpslope, "simplified slope")
 #### 6 putting together the rasters
-lsc_unit= p.runalg("gdalogr:rastercalculator",simplu,"1",simpasp,"1",simpslope,"1",None,"1",None,"1",None,"1","(A*100)+(B*10)+C","",5,"",None)
+lsc_unit=p.runalg("gdalogr:rastercalculator",simplu,"1",simpasp,"1",simpslope,"1",None,"1",None,"1",None,"1","(A*100)+(B*10)+C","",5,"",os.path.join(directory,"test.tif"))
+
+print "raw landscape units raster is"
+print lsc_unit
+iface.addRasterLayer(lsc_unit['OUTPUT'], "simplified landscape unit")
 
 if QgsRasterLayer(lsc_unit['OUTPUT']).isValid():
 # simplify landscape unit map
     lsc_unit_simp=simp(lsc_unit)
     print "landscape unit map produced"
+
+
+
 
 ### 7 translating raster to vector
 
@@ -284,9 +299,9 @@ vect_diss=p.runalg("gdalogr:dissolvepolygons",vect,"geometry","code",True,False,
 Lvect_diss=QgsVectorLayer(vect_diss['OUTPUT_LAYER'], "dissolved", "ogr")
 #Add Attributes:
 res = Lvect_diss.dataProvider().addAttributes([\
-    QgsField("land_use", QVariant.String ),\
-    QgsField("slope", QVariant.String),\
+    QgsField("landCover", QVariant.String ),\
     QgsField("aspect", QVariant.String),\
+    QgsField("slope", QVariant.String),\
     ])
 Lvect_diss.updateFields()
 
@@ -312,9 +327,9 @@ for feature in iter:
     numb=feature['code']
     
     a,b,c=str(numb)
-    feature['land_use'] = lulist[int(a)-1]
-    feature['slope']= slolist[int(b)]
-    feature['aspect'] = asplist[int(c)]
+    feature['landCover'] = lulist[int(a)-1]
+    feature['aspect']= asplist[int(b)-1]
+    feature['slope'] = slolist[int(c)-1]
     #print numb, feature['land_use'], feature['slope'], feature['aspect']
     layer.updateFeature(feature)
 

@@ -376,6 +376,40 @@ def ndCalc(Red, Nir, wod):
         print ndPath
     return ndPath
 
+#7.1 Alternative to NDVI: MSAVI calculation
+#input: Red (STRING) - path to Red band
+#       Nir (STRING) - path to NIR band
+#       wod (STRING) - path to working directory
+#output: path to MSAVI image
+def saviCalc(Red, Nir, wod):
+    fStr="((B-A)*(1+0.7))/(B+A+0.7)"
+    ndPath=wod+"MSAVI.tif"
+    nd=p.runalg("gdalogr:rastercalculator",Red,"1",Nir,"1",None,"1",None,"1",None,"1",None,"1",fStr,"",5,"",ndPath)
+    if not QgsRasterLayer(ndPath).isValid():
+        print "problem creating SAVI!\n\n -->quitting script on image %s" % baseName
+        #stopGo(367, baseName)
+    else:
+        print "output of function 7 ndCalc is: \n\n"
+        print ndPath
+    return ndPath
+
+#7.2 Alternative to NDVI: MSAVI2 calculation
+#input: Red (STRING) - path to Red band
+#       Nir (STRING) - path to NIR band
+#       wod (STRING) - path to working directory
+#output: path to MSAVI image
+def msavi2Calc(Red, Nir, wod):
+    fStr="(2*B+1-sqrt(((2*B+1)^2)-(8*(B-A)))/2"
+    ndPath=wod+"MSAVI2.tif"
+    nd=p.runalg("gdalogr:rastercalculator",Red,"1",Nir,"1",None,"1",None,"1",None,"1",None,"1",fStr,"",5,"",ndPath)
+    if not QgsRasterLayer(ndPath).isValid():
+        print "problem creating MSAVI2!\n\n -->quitting script on image %s" % baseName
+        #stopGo(367, baseName)
+    else:
+        print "output of function 7 ndCalc is: \n\n"
+        print ndPath
+    return ndPath
+
 #8 vector mask to exclude clouds
 #input: img (STRING) - path to geotiff (NDVI in this case)
 #       clPath (STRING) - path to cloud masks main location
