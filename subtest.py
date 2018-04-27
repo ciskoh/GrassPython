@@ -232,11 +232,11 @@ def simp(rawrast):
         rawRast.extent().yMaximum())
     # remove small areas    
     rawRast2=p.runalg("grass7:r.reclass.area.greater",rawRast,0,minHec,coords,0,None)
-    rawRast=rawRast2[rawRast2.keys()[0]]
+    
         
         
     neigh=list()
-    neigh.append(rawRast)
+    neigh.append(rawRast2)
         
             
     for i in sizelist:

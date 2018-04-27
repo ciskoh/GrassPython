@@ -37,7 +37,7 @@ ind="/mnt/cephfs/data/BFH/Geodata/World/Sentinel-2/S2MSI1C/GeoTIFF"
 tiles=['T30STA', 'T30STB', 'T30SUA', 'T30SUB']
 
 #years to be considered
-yea=[2016, 2017, 2018]
+yea=[2018]
 
 #
 #path to Dem for topographic correction
@@ -48,7 +48,7 @@ dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 # output directory
 #local dir outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
 #remote dir
-outd="/home/jkm2/GIS/Sentinel_preprocess/test/ndvi_output"
+outd="/home/jkm2/GIS/Sentinel_preprocess/test/savi_output"
 # working folder for temporary folders
 temp1="/home/jkm2/GIS/Sentinel_preprocess/test/WOD"
 
@@ -383,7 +383,7 @@ def ndCalc(Red, Nir, wod):
 #output: path to MSAVI image
 def saviCalc(Red, Nir, wod):
     fStr="((B-A)*(1+0.7))/(B+A+0.7)"
-    ndPath=wod+"MSAVI.tif"
+    ndPath=wod+"SAVI.tif"
     nd=p.runalg("gdalogr:rastercalculator",Red,"1",Nir,"1",None,"1",None,"1",None,"1",None,"1",fStr,"",5,"",ndPath)
     if not QgsRasterLayer(ndPath).isValid():
         print "problem creating SAVI!\n\n -->quitting script on image %s" % baseName
@@ -398,6 +398,7 @@ def saviCalc(Red, Nir, wod):
 #       Nir (STRING) - path to NIR band
 #       wod (STRING) - path to working directory
 #output: path to MSAVI image
+
 def msavi2Calc(Red, Nir, wod):
     fStr="(2*B+1-sqrt(((2*B+1)^2)-(8*(B-A)))/2"
     ndPath=wod+"MSAVI2.tif"
@@ -546,6 +547,9 @@ def main(ipat):
 
     ## Function to calculate NDVI
     nd=ndCalc(redCor, nirCor, wod)
+
+    ##ALT: function to calculate SAVI
+    nd=saviCalc(redCor, nirCor, wod)
     print "ndvi should be in %s" %nd
     # output should be path to corrected image (NIR)
 #    stopGo(504, baseName)
