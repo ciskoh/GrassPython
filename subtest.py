@@ -3,12 +3,18 @@
 
 #-----------------------PARAMETERS------------------------------------------
 #### ALTERNATIVE PATH TO INPUT FILES FOR TESTING
-dem="/home/jkm2/GIS/DEM/complete_dem_Filled.tif"
-lu="/home/jkm2/GIS/land cover/LandCover_updated/Land_cover_updated.tif"
+#LINUX SERVER dem="/home/jkm2/GIS/DEM/complete_dem_Filled.tif"
+# LINUX LOCAL
+dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/complete_dem_Filled.tif"
+ 
+#LINUX SERVER lu="/home/jkm2/GIS/land cover/LandCover_updated/Land_cover_updated.tif"
+# LINUX LOCAL
+lu="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/land cover/LandCover_updated/Land_cover_updated.tif"
 
 #Output directory
-wod="/home/jkm2/GIS/Analysis/"
-
+# LINUX SERVER wod="/home/jkm2/GIS/Analysis/"
+# LINUX LOCAL
+wod="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Analysis/"
 #crs of utm zone
 ref=32630
 #### Land use categories
