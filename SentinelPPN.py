@@ -12,8 +12,8 @@ import qgis
 from qgis.core import *
 #from PyQt4.QtGui import *
 
-Qgsapplication.setPrefixPath("/usr", False)
-app = QgsApplication([], False)
+QgsApplication.setPrefixPath("/usr", False)
+app = QgsApplication([], True)
 app.initQgis()
 sys.path.append('/usr/share/qgis/python/plugins')
 from processing.core.Processing import Processing
