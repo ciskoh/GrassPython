@@ -219,34 +219,33 @@ print "size of area in pixels", minpix**2
 
 sizelist=[minpix, minpix+2, minpix+4]
 minHec=minar/10000
+# simplify function needs a string path to "rawrast" files
 def simp(rawrast):
-    if isinstance(rawrast, dict):
-        rawRast=QgsRasterLayer(rawrast[rawrast.keys()[0]])
-    else:
-        rawRast=rawrast
-    
+            
+    rawLay=QgsRasterLayer(rawrast)
     # get extension of raster
-    coords="%f,%f,%f,%f" %(rawRast.extent().xMinimum(),\
-        rawRast.extent().xMaximum(),\
-        rawRast.extent().yMinimum(),\
-        rawRast.extent().yMaximum())
-    # remove small areas    
-    rawRast2=p.runalg("grass7:r.reclass.area.greater",rawRast,0,minHec,coords,0,None)
-    
+    coords="%f,%f,%f,%f" %(rawLay.extent().xMinimum(),\
+        rawLay.extent().xMaximum(),\
+        rawLay.extent().yMinimum(),\
+        rawLay.extent().yMaximum())
         
+    # remove small areas    
+    rawRast2=p.runalg("grass7:r.reclass.area.greater",rawrast,0,minHec,coords,0,None)['output']
+            
         
     neigh=list()
     neigh.append(rawRast2)
         
-            
-    for i in sizelist:
+    s2=sizelist
+    s2.reverse()
+    for i in s2:
         #calling command
-        n=p.runalg("grass7:r.neighbors", rawRast, meth, i, True, False, "", coords, 0, None)
+        n=p.runalg("grass7:r.neighbors", rawrast, meth, i, True, False, "", coords, 0, None)
         #add to list of rasters
         # na=QgsRasterLayer(n['output'])
-        neigh.append(QgsRasterLayer(n['output']))
+        neigh.append(n['output'])
         
-        #print neigh
+    
 
     #patch rasters to obtain generalized map
     a=p.runalg("grass7:r.patch",neigh,False,coords,0,None)['output']
@@ -269,9 +268,7 @@ print "slope is simplified"
 simplu=llu.source()
 print "land use is simplified"
 print(simplu)
-iface.addRasterLayer(simpasp, "simplified aspect")
-iface.addRasterLayer(simplu, "simplified land cover")
-iface.addRasterLayer(simpslope, "simplified slope")
+
 #### 6 putting together the rasters
 lsc_unit=p.runalg("gdalogr:rastercalculator",simplu,"1",simpasp,"1",simpslope,"1",None,"1",None,"1",None,"1","(A*100)+(B*10)+C","",5,"",os.path.join(directory,"test.tif"))
 
@@ -281,7 +278,7 @@ iface.addRasterLayer(lsc_unit['OUTPUT'], "simplified landscape unit")
 
 if QgsRasterLayer(lsc_unit['OUTPUT']).isValid():
 # simplify landscape unit map
-    lsc_unit_simp=simp(lsc_unit)
+    lsc_unit_simp=simp(lsc_unit['OUTPUT'])
     print "landscape unit map produced"
 
 
