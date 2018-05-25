@@ -20,12 +20,16 @@ Processing.initialize()
 import processing as p
 
 
+
+import time
+import xml.etree.ElementTree as ET
+from decimal import *
 from pyproj import Proj, transform
 from multiprocessing import Pool
 import datetime
 import numpy as np
 from osgeo import gdal
-import shutil
+
 
 #----------------------------PARAMETERS
 #input directory
@@ -40,13 +44,11 @@ yea=[2016, 2017, 2018]
 
 #
 #path to Dem for topographic correction
-#remote 
 dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
-#local dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 
 # output directory
 #local dir outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
-#remote dir 
+#remote dir
 outd="/home/jkm2/GIS/Sentinel_preprocess/test/output"
 # working folder for temporary folders
 temp1="/home/jkm2/GIS/Sentinel_preprocess/test/WOD"
@@ -59,7 +61,7 @@ timestr=(
     
 logpath=outd+"/"+"log.txt"
 Lfile=open(logpath, "w")
-logtext= "\nAthmospheric correction using SentinelPreprocessing.py started at %s" %(timestr)
+logtext= "Athmospheric correction using SentinelPreprocessing.py started at %s" %(timestr)
 Lfile.write(logtext)
 print logtext
 
@@ -67,35 +69,38 @@ print logtext
 #TRIGGER to check if there are new images
 
 ##Search for images in input directory
-#function to search for images recursively
 # empty list with root
-def srcImg(folds):
-    bnlist=[]
-    rlist=[]
-	#search for tiff files in folder
-    for i in folds:
-        for r,d,files in os.walk(i):
-            for f in files:
-                if f.endswith(".tif"):
-                    bnlist.append(f)
-                    rlist.append(os.path.join(r,f))
-    finlist=[bnlist, rlist]
-    return finlist
-###Search in input directory
-multifolds1=(ind+"/"+tile for tile in tiles)
-Orlist=srcImg(multifolds1)
+rlist=[] 
+#path to images
+multifolds=(ind+"/"+tile for tile in tiles)
+#search for tiff files in folder
+for i in multifolds:
+    for r,d,files in os.walk(i):
+        for f in files:
+            if f.endswith(".tif"):
+                rlist.append(os.path.join(r,f))
+
+
 ##Search in output directory
 
-multifolds2=(outd+"/"+tile for tile in tiles)
-Outlist=srcImg(multifolds2)
-####list of output images
+multifolds=(outd+"/"+tile for tile in tiles)
+#list of output images
+
+#actual search of images
+Ochlist=[]
+for i in multifolds:
+    for r,d,files in os.walk(i):
+        for f in files:
+            if f.endswith(".tif"):
+                Ochlist.append(f)
+
 # get sublist of missing/non processed images
 
-RlistNP=[y for y in Orlist[1] if os.path.basename(y) not in Outlist[0]]
+RlistNP=[y for y in rlist if os.path.basename(y) not in Ochlist]
 
 #if sublist is of length 0 exit right now
 if len(RlistNP) == 0:
-    print "no image to correct.\n\n****Quitting program****"
+    print "no image to correct.\nQuitting program"
     quit()
 else:
     logstr2= "\nfound %d unprocessed images" %(len(RlistNP))
@@ -106,44 +111,43 @@ else:
         print os.path.basename(i)
 	Lfile.write(os.path.basename(i))
 
+#### 1 set qgis variables and open mapset
+
+#Python variables to be set for qgis
+
+#Open qgis
+
+#### 2 Import images
+
+#list of of folders
+
+
+# cycle through sublist
+#Parallel instead of cycle
+#args = [A, B]
+#results = pool.map(solve1, args)
+
+#***********Temporary variable to avoid loop
+#ipat=RlistNP[0]
+	
+#*************************************************
 # get path of image
 	# import image
 #calling process as function
 def correct(ipat):
-    # use global variables
-    global dem
-    global outd
-    global temp
-    #get baseName
-    baseName = os.path.basename(ipat)[0:-4]
-    orImg = QgsRasterLayer(ipat, baseName)
+    fileName = ipat
+    baseName = os.path.basename(dem)[0:-4]
+    orImg = QgsRasterLayer(fileName, baseName)
     if not orImg.isValid():
         print "\nLayer failed to load!"
-    #working folder for temp file
-    wod=temp1+"/"+baseName+"/"
-    # image extension as string
-    extImg="%f,%f,%f,%f" %(orImg.extent().xMinimum(),\
-                orImg.extent().xMaximum(),\
-                orImg.extent().yMinimum(),\
-                orImg.extent().yMaximum())
+    
     #check of reference system and reprojection
     imgCrs= orImg.crs()
-    demCrs=QgsRasterLayer(dem).crs()
-    print "\nImage CRS :%s\n dem crs:%s" %(imgCrs.description(), demCrs.description())
+    print "\nImage CRS :", imgCrs.description()
 
-    if demCrs != imgCrs:
+    if QgsRasterLayer(dem).crs() != imgCrs:
         print "\nreprojecting DEM to %s" %(imgCrs.description())
-        ldem=QgsRasterLayer(dem)
-        extdem="%f,%f,%f,%f" %(ldem.extent().xMinimum(),\
-                ldem.extent().xMaximum(),\
-                ldem.extent().yMinimum(),\
-                ldem.extent().yMaximum())
-        crsStr=imgCrs.authid()
-        newdem=p.runalg("gdalogr:warpreproject",ldem,"",crsStr,"",30,0,False,extdem,"",5,4,75,6,1,False,0,False,"",wod+"newdem.tif")
-        LnDem=QgsRasterLayer(newdem['OUTPUT'])
-        if LnDem.isValid():
-            print "dem reprojected correctly"
-            dem=newdem['OUTPUT']
+        #TODO: reproject DEM
     else:
         print "\nall files are in the same CRS!"
      
@@ -151,28 +155,31 @@ def correct(ipat):
      # count number of bands and create list of names
     brange=range(1,orImg.bandCount()+1)
     blist=["band"+str(x) for x in brange]
-    
-    #Function to open file in Gdal and export single band
-    def expBand(rast,i):
-        #band name and path
-        bname="band"+str(i)
-        directory=temp1+"/"+baseName
-        path=directory+"/"+bname+".tif"
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-    #        call to gdal translate with option
-        gdal.Translate(path, rast, bandList=[i])
-        if not QgsRasterLayer(path).isValid():
-            print "problem saving single band %s" %(i)          
-        else:
-            print "band %s saved in %s" %(i, path)
-        return path
-#call to function
-    bPatDic={}
-    for i in brange:
-        tp=expBand(ipat, i)
-	bPatDic["band"+str(i)]=tp
-    
+
+    # get coordinates
+    extImg="%f,%f,%f,%f" %(orImg.extent().xMinimum(),\
+        orImg.extent().xMaximum(),\
+        orImg.extent().yMinimum(),\
+        orImg.extent().yMaximum())
+
+    try:
+        bPatDic
+    except NameError:
+        bPatDic={}
+    if len(bPatDic) == 0:
+        #create dictionary to hold band names and path
+        bPatDic={}
+        for i in brange:
+            #name of band
+            bname=blist[i-1]
+            bstr="-b "+str(i)
+            #save raster in temp folder
+            print "saving %s" %(bname)
+            tband=p.runalg("gdalogr:translate",orImg,100,True,"",0,"",extImg,False,6,4,75,6,1,False,0,False,bstr,None)
+            if QgsRasterLayer(tband['OUTPUT']).isValid():
+                print "layer %s is valid" %bname
+                bPatDic[bname]=tband['OUTPUT']
+
     #### 3 Athmospheric correction
 
     #### create 6s parameters file for each band
@@ -180,17 +187,20 @@ def correct(ipat):
     #For second line
     #read end of basename for date and time
     dateS=baseName.split("_")[2]
-    #MSAVI
+    print "date of image %s is %s" %(baseName,dateS)
+    year=dateS[0:4]
     month=dateS[4:6]
     day=dateS[6:8]
 
     hours=dateS[9:11]
     minutes=dateS[11:13]
+    seconds=dateS[13:15]
     # hours and day in decimal time
     dmin=round(100*float(minutes)/60,0)
+
     dtime=str(hours)+"."+str(dmin/100)[2:]
 
-    #long lat (centre point) in WGS84
+    #long lat (centre point)
     long=orImg.extent().xMinimum()+((orImg.extent().xMaximum()-orImg.extent().xMinimum())/2)
     lat=orImg.extent().yMinimum()+((orImg.extent().yMaximum()-orImg.extent().yMinimum())/2)
     # transform long and lat in WGS 84
@@ -200,15 +210,12 @@ def correct(ipat):
 
     # For seventh line (average altitude in km)
     #altitude average
-    #print "starting dem work"
-    #demStats=p.runalg("grass7:r.univar",dem,None,"","",False,extImg,wod+"demstats")
-    #statFile=open(demStats['output'], "r")
-    #line=statFile.read().splitlines()[1]
+    demStats=p.runalg("grass7:r.univar",dem,None,"","",False,extImg,None)
+    statFile=open(demStats['output'], "r")
+    line=statFile.read().splitlines()[1]
     #negative altitude average in km
-    #avgDem=-1*float(line.split('|')[6])/1000
-    #simplified dem
-    avgDem=-1.400
-    print "finished dem work"
+    avgDem=-1*float(line.split('|')[6])/1000
+
     #For eighth line (Sensor band)
     # band codes as dictionary
     bcodes=range(166, 179)
@@ -221,15 +228,10 @@ def correct(ipat):
     ####---- Loop through bands
     for i in brange:
         band="band"+str(i)
-	bRastStr=bPatDic[band]
-        bRast=QgsRasterLayer(bRastStr)
-	if not bRast.isValid():
-		print "problem with raster band image to correct"
-		print "\n path to image is: %s" %(bPatDic[band])
-		quit()
+        bRast=QgsRasterLayer(bPatDic[band])
         
         #path to parameter file
-        Spath=str(temp1+"/"+baseName+"/"+band+"_.atcorParam.txt")
+        Spath=str(temp1+baseName+band+"atcorParam.txt")
         Sfile=open(Spath, "w")
         #Writing paramater file
         #first line : satellite type
@@ -278,26 +280,23 @@ def correct(ipat):
         Sfile.close()
         #minimum and maximum pixel value
         #range of values
-        ds = gdal.Open(bRastStr)
-        myarray = np.array(ds.GetRasterBand(1).ReadAsArray())
-        pMax=np.nanmax(myarray)
-        pMin=np.nanmin(myarray)
+        ds = gdal.Open(dem)
+	myarray = np.array(ds.GetRasterBand(1).ReadAsArray())
+        pMin=np.nanmax(myarray)
+        pMax=np.nanmin(myarray)
         pRange=str(pMin)+","+str(pMax)
-        print 'pixel range is %s' %(pRange)
-        # launch athmospheric correction        
-        print "launching athmospheric correction on image %s and %s" %(baseName[-10:],band)
-        corPath=wod+"corrImg_"+band+".tif"
-        corrImg=p.runalg("grass7:i.atcorr",bRast,pRange,None, None,Spath,pRange,False,True,False,False,extImg,0,corPath)
-        if QgsRasterLayer(corPath).isValid():
-	    print "athmospheric correction is valid for %s" %band
-            corrDic[band]=corPath
-	else:
-	    print "problem correcting image %s. \n\n Quitting script" %corPath
-	    quit()
+	print 'pixel range is %s' %(pRange)
+        # launch athmospheric correction
+        
+	print "launching athmospheric correction on image"+baseName[-10:]
+        corrImg=p.runalg("grass7:i.atcorr",bRast,pRange,None, None,Spath,pRange,False,True,False,False,extImg,0,None)
+        #corrImg2=p.runalg("gdalogr:translate",corrImg['output'],100,True,"",0,"",extImg,False,6,4,75,6,1,False,0,False,"",None)
+	if QgsRasterLayer(corrImg['output']).isValid:
+		print "athmospheric correction is valid"
+        	corrDic[band]=corrImg['output']
 
     # preparing list of inputs for topographic correction
-    inpList=corrDic.values()
-    print inpList
+    inpList=[corrDic[x] for x in blist ]
     #### TOPOGRAPHIC CORRECTION
     # preparation
     #calculating sun azimuth and zenith
@@ -343,23 +342,16 @@ def correct(ipat):
     outpath=os.path.join(outd,scId)
     if not os.path.exists(outpath):
         os.makedirs(outpath)
-    print "saving final file from images %s" %(str(inpList))
+
     outpath2=outpath+"/"+baseName+".tif"
     final=p.runalg("gdalogr:merge",inpList,False,True,6,outpath2)
-    if QgsRasterLayer(outpath2).isValid():
-    	print "final multilayer image is saved"
-    else:
-        print "\n\n *** problem saving final image %s ***" %baseName
+    
     #cleanup
     bPatDic={}
     corrDic={}
-    #remove working files
-    shutil.rmtree(wod)
     
-    print "all working files removed"    
     return final['OUTPUT']
     
-<<<<<<< HEAD
 #calling function
 pool=Pool(88)
 results=pool.map(correct, RlistNP)
@@ -371,16 +363,28 @@ results=pool.map(correct, RlistNP)
     
     
 	#### 5 Vegetation indices calculation
-=======
-#calling function in parallel mode
-pool=Pool(20)
-results=pool.map(correct, RlistNP)
->>>>>>> MSAVI
 
-### procedural run
-#print "\n\n"+str(RlistNP)
-#for ipat in RlistNP[0:5]:
-#    results=correct(ipat)
+	# get bands for NDVI
+
+	# calculate soil adjusted NDVI
+
+	# get swir band (with pansharpening?)
+
+	# other vegetation index
+
+
+
+	#### 6 Exporting
+	
+	# Create image-specific folder in outd
+
+	# create folder for all bands
+
+	# create folder for vegetation indices
+
+	# Export images
+
+# end of cycle
 
 
 
@@ -401,14 +405,10 @@ timestr2=(
 logstr="Corrected images are available in %s" %(outd)
 logstr2="Script finished correctly at %s" %(timestr2)
 
-Lfile.write(logstr)
-Lfile.write(logstr2)
-Lfile.close()
-print logstr
-print logstr2
+
 # When your script is complete, call exitQgis() to remove the provider and
 # layer registries from memory
-app.exitQgis()
+qgs.exitQgis()
 
 
 

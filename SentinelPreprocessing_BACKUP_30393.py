@@ -180,7 +180,12 @@ def correct(ipat):
     #For second line
     #read end of basename for date and time
     dateS=baseName.split("_")[2]
-    #MSAVI
+<<<<<<< HEAD
+    print "date of image %s is %s" %(baseName,dateS)
+    year=dateS[0:4]
+=======
+
+>>>>>>> MSAVI
     month=dateS[4:6]
     day=dateS[6:8]
 

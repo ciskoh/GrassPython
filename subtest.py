@@ -1,25 +1,30 @@
 #!/usr/bin/python
 #Script to create landscape unit map using land use and land cover raster
-
+#CONFIGURATION: FAO land cover map 
 #-----------------------PARAMETERS------------------------------------------
-#### ALTERNATIVE PATH TO INPUT FILES FOR TESTING
+#### Linux Server PATH TO INPUT FILES FOR TESTING
 dem="/home/jkm2/GIS/DEM/complete_dem_Filled.tif"
-lu="/home/jkm2/GIS/land cover/LandCover_updated/Land_cover_updated.tif"
+lu="/home/jkm2/GIS/land cover/FAO/LandCoverFAO_30.tif"
 
-#Output directory
-wod="/home/jkm2/GIS/Analysis/"
+#### Linux local
+# DEM dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/complete_dem_Filled.tif"
+# LAND COVER lu="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/land cover/FAO/LandCoverFAO_30.tif"
 
+#### Output directory location & name
+# linux server 
+wod="/home/jkm2/GIS/Analysis"
+# linux local wod="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Analysis"
+wodName="Lsc_Map_FAO2"
+
+#### MAP CREATION PARAMETERS
 #crs of utm zone
 ref=32630
 #### Land use categories
-
-lulist=["Grassland", "Open shrubland", "Dense shrubland", "Open forest", "Dense forest", "Agriculture"]
-
-
+lulist=["Irrig. agriculture", "Dry agriculture", "Steppa", "Open shrubland", "Open forest", "Dense forest"]
 
 #### ASPECT PARAMETERS and category names
-asrul="0 thru 45 = 1 north\n315 thru 360 = 1 north\n45 thru 135 = 2 east\n135 thru 225 = 3 south\n225 thru 315 = 4 west\n\n"
-asplist=["Flat", "North", "East", "South", "West"]
+asrul="0 thru 90 = 1 north\n270 thru 360 = 1 north\n90 thru 270 = 2 east"
+asplist=["North", "South"]
 
 #### SLOPE PARAMETERS
 slorul="0 thru 10 = 1 flat\n10 thru 15 = 2 sloping\n15 thru 30 = 3 steep\n30 thru 100 = 4 very steep"
@@ -31,13 +36,6 @@ minar=20000
 ### Pixel resolution in meters
 utmPix=30
 
-#Method for generalisation
-meth=2
-#options: 0 -average, 2 -median,3 -mode, 4 -minimum, 5 -maximum,
-# 5 -range, 7 -stddev, 8 -sum, 9 -count, 10 -variance, 11 -diversity,
-# 12 -interspersion, 13 -quart1, 14 -quart3, 
-# 15 -perc90, 16 -quantile
-
 #---------------------------------------------------------------------------
 
 from PyQt4.QtGui import *
@@ -48,16 +46,8 @@ import os
 from math import sqrt
 from shutil import copyfile
 import time
-# 0 Preprocessing
-# creating output directory
-directory=wod+"/lscMap-script"
-dirPart=directory+"/workingFiles"
-dirFin=directory+"/finalOutput"
-if not os.path.exists(directory):
-    os.makedirs(directory)
-os.makedirs(dirPart)
-os.makedirs(dirFin)
 
+#----------------------------------------FUNCTIONS
 # 0.1 Importing files
 
 ####  TODO: remove "#" from the lines before 
@@ -69,227 +59,215 @@ os.makedirs(dirFin)
 #
 #title = ' **** SELECT DTM *****'
 #dem = QFileDialog.getOpenFileName(qfd, title, path)
-
-
-# import dem as layer ldem
-fileName = dem
-fileInfo = QFileInfo(fileName)
-baseName = fileInfo.baseName()
-ldem = QgsRasterLayer(fileName, baseName)
-if not ldem.isValid():
-  print "Layer failed to load!"
-
-# import land cover as layer llu
-fileName = lu
-fileInfo = QFileInfo(fileName)
-baseName = fileInfo.baseName()
-llu = QgsRasterLayer(fileName, baseName)
-if not llu.isValid():
-  print "Layer failed to load!"
-
-# 0.2 TODO: Allignment and resolution check
-#Resolution check
-llures=llu.rasterUnitsPerPixelX()
-demres=ldem.rasterUnitsPerPixelX()
-
-bigres=max(llures,demres)
-print "llures", llures
-print "demres", demres
-
-#creating object for refrence crs system
-#to get EPSG id crs.postgisSrid()
-
-cref=QgsCoordinateReferenceSystem(ref)
-#string for epsg
-
-### reprojecting DEM
-crefstr="EPSG:"+str(ref)
-#extension of layer
-extdem="%f,%f,%f,%f" %(ldem.extent().xMinimum(),\
-    ldem.extent().xMaximum(),\
-    ldem.extent().yMinimum(),\
-    ldem.extent().yMaximum())
-    
-if ldem.crs() != QgsCoordinateReferenceSystem(ref):
-    newdem=p.runalg("gdalogr:warpreproject",dem,"",crefstr,"",utmPix,0,False,extdem,"",5,4,75,6,1,False,0,False,"",None)
-    
-    if not QgsRasterLayer(newdem['OUTPUT']).isValid():
-        print "DEM layer transformation not valid"
-    else:
-        ldem= QgsRasterLayer(newdem['OUTPUT'])
-        extdem="%f,%f,%f,%f" %(ldem.extent().xMinimum(),\
-            ldem.extent().xMaximum(),\
-            ldem.extent().yMinimum(),\
-            ldem.extent().yMaximum())
-
-### reprojecting LUS
-crefstr="EPSG:"+str(ref)
-#extension of layer
-extllu="%f,%f,%f,%f" %(llu.extent().xMinimum(),\
-    llu.extent().xMaximum(),\
-    llu.extent().yMinimum(),\
-    llu.extent().yMaximum())
-    
-if llu.crs() != QgsCoordinateReferenceSystem(ref):
-    newlu=p.runalg("gdalogr:warpreproject",lu,"",crefstr,"",utmPix,0,False,extllu,"",5,4,75,6,1,False,0,False,"",None)
-    
-    if not QgsRasterLayer(newlu['OUTPUT']).isValid():
-        print "land cover layer transformation not valid"
-    else:
-        llu= QgsRasterLayer(newlu['OUTPUT'])
-        extllu="%f,%f,%f,%f" %(llu.extent().xMinimum(),\
-            llu.extent().xMaximum(),\
-            llu.extent().yMinimum(),\
-            llu.extent().yMaximum())
-        print "land use extension", extllu    
-            
-# making layer same extension
-
-
-#extent as list
-lluex=[llu.extent().xMinimum(),\
-    llu.extent().xMaximum(),\
-    llu.extent().yMinimum(),\
-    llu.extent().yMaximum()]
-
-demex=[ldem.extent().xMinimum(),\
-    ldem.extent().xMaximum(),\
-    ldem.extent().yMinimum(),\
-    ldem.extent().yMaximum()]
-    
-
-
-
-newext=[max(lluex[0], demex[0]), min(lluex[1], demex[1]), max(lluex[2], demex[2]), min(lluex[3], demex[3])]
-
-newextStr=str(newext[0])+","+str(newext[1])+","+str(newext[2])+","+str(newext[3])
-
-
-# setting new extension to both rasters
-llu=QgsRasterLayer(p.runalg("gdalogr:cliprasterbyextent",llu,"",newextStr,5,4,75,6,1,False,0,False,"",None)['OUTPUT'])
-ldem=QgsRasterLayer(p.runalg("gdalogr:cliprasterbyextent",ldem,"",newextStr,5,4,75,6,1,False,0,False,"",None)['OUTPUT'])
-
-#check resolution
-lluex=[llu.extent().xMinimum(),\
-    llu.extent().xMaximum(),\
-    llu.extent().yMinimum(),\
-    llu.extent().yMaximum()]
-
-demex=[ldem.extent().xMinimum(),\
-    ldem.extent().xMaximum(),\
-    ldem.extent().yMinimum(),\
-    ldem.extent().yMaximum()]
-    
-print "new extensions:", "lu", lluex, "dem", demex
-#### 1 ASPECT from DEM
-
-# calculate aspect
-tempasp=p.runalg("gdalogr:aspect", ldem ,1,False,False,False,True,None)
-
-
-###2 SLOPE
-tempslo=p.runalg("gdalogr:slope",ldem,1,False,False,True,1,None)
-
-# reclassify aspect and slope in classes based on asprul and slorule
-aspclass=p.runalg("grass7:r.reclass", tempasp['OUTPUT']\
-,"", asrul,extdem,0,None)
-sloclass=p.runalg("grass7:r.reclass",tempslo['OUTPUT'],"",slorul,extdem,0,None)
-
-## 3 classify areas under 5 degrees of slope as flat: 0 aspect and 0 slope
-newasp=p.runalg("gdalogr:rastercalculator",tempslo['OUTPUT'],"1",aspclass['output'],"1",None,"1",None,"1",None,"1",None,"1","0*(A<=5)+B*(A>5)","",5,"",None)
-newslo=p.runalg("gdalogr:rastercalculator",tempslo['OUTPUT'],"1",sloclass['output'],"1",None,"1",None,"1",None,"1",None,"1","0*(A<=5)+B*(A>5)","",5,"",None)
-
-#### 4 simplification
-print "resolution of rasters", utmPix
-print "minimum area in sq. meters", minar
-minpix= int(round(sqrt(minar)/utmPix))
-
-# ratio resolution to minimum area
-
-if minpix%2 == 0:
-    minpix=minpix+1
-
-print "newminpix", minpix
-print "size of area in pixels", minpix**2
-
+# simplify function needs a string path to "rawrast" files
 ## 5. function to simplify rasters 
 
-sizelist=[minpix, minpix+2, minpix+4]
+# 0.2 Import files
+# input: path to file
+# output: QgsRasterLayer
 
-def simp(rawrast):
-        
-        if isinstance(rawrast, dict):
-            rawRast=QgsRasterLayer(rawrast['OUTPUT'])
-        else:
-            rawRast=rawrast
-        neigh=list()
-        
-        # get extension of raster
-        coords="%f,%f,%f,%f" %(rawRast.extent().xMinimum(),\
-            rawRast.extent().xMaximum(),\
-            rawRast.extent().yMinimum(),\
-            rawRast.extent().yMaximum())
+def fileImport(path):
+    fileName = path
+    fileInfo = QFileInfo(fileName)
+    baseName = fileInfo.baseName()
+    lay = QgsRasterLayer(fileName, baseName)
+    if not lay.isValid():
+	print "Layer failed to load!"
+    else:
+        return lay
+
+# 1.1 Get layer extension as string
+# input: lay - layer, form (boolean)- 0 for string 1 for list
+# output: string/List of coordinates in layer CRS
+def getCoord(lay, form):
+    if form == 0:
+    	extLay=lay.extent().toString().replace(" : ",",")
+    else:
+        extLay=[lay.extent().xMinimum(),\
+            lay.extent().xMaximum(),\
+            lay.extent().yMinimum(),\
+            lay.extent().yMaximum()]
+    return extLay
+
+# 1.2 reprojecting layers to UTM 
+# input: lay - layer to reproject, ref - UTM reference code ("EPSG"), utmPix - pixel resolution in meters
+# output: reprojected layer
+
+def reproj(lay, ref, utmPix):
+    refStr="EPSG:"+str(ref)
+    #extension of layer
+    extLay=getCoord(lay, 0)
     
-        for i in sizelist:
-            #calling command
-            n=p.runalg("grass7:r.neighbors", rawRast, meth, i, True, False, "", coords, 0, None)
-            #add  to list of rasters
-            # na=QgsRasterLayer(n['output'])
-            neigh.append(QgsRasterLayer(n['output']))
-
-        #print neigh
-
-        #patch rasters to obtain generalized map
-        a=p.runalg("grass7:r.patch",list(reversed(neigh)),False,coords,0,None)
+    if lay.crs() != QgsCoordinateReferenceSystem(ref):
+        newRast=p.runalg("gdalogr:warpreproject",lay,lay.crs().authid(),refStr,"",utmPix,0,False,extLay,"",5,4,75,6,1,False,0,False,"",None)
+        newLay=QgsRasterLayer(newRast['OUTPUT'])
+    else:
+        print "layer already in CRS %s" %(refStr)
+        newLay=lay 
     
-        #sieve to remove small patches
-        b=p.runalg("gdalogr:sieve", a['output'], minpix**2, 0, None)
-       
-        return b
+    if not newLay.isValid():
+        print "layer transformation not valid"
+    else:
+        return newLay
 
 
-##call function to aspect
-#simpasp=simp(newasp)['OUTPUT']
-simpasp=newasp['OUTPUT']
-print "aspect is simplified"
 
-##call function to slope
-#simpslope=simp(newslo)['OUTPUT']
-simpslope=newslo['OUTPUT']
-print "slope is simplified"
+# simplify raster based on minimum area
+# input: lay - raster layer, minar - size of min. homogeneous area
+# implicit input: dirPart - folder for working files
+# output: simplified layer
 
-##call function to land cover
-#simplu=simp(llu)['OUTPUT']
-simplu=llu
-print "land use is simplified"
 
-#### 6 putting together the rasters
-lsc_unit= p.runalg("gdalogr:rastercalculator",simplu,"1",simpasp,"1",simpslope,"1",None,"1",None,"1",None,"1","(A*100)+(B*10)+C","",5,"",None)
+def simp(lay, minar):
+    res=lay.rasterUnitsPerPixelX()
+    
+    minPix= int(round(sqrt(minar)/res))
+    if minPix%2 == 0:
+        minPix=minPix+1
+    
+    minHec=minar/10000
+    
+    
+    # get extension of raster
+    coords=getCoord(lay, 0)
+    
+    # get layer with areas above minimum threshold
+    pathLayBig=os.path.join(dirPart, "layBig.tif")
+    layBig=p.runalg("grass7:r.reclass.area.greater",lay,0,minHec,coords,0,pathLayBig)
+    # create multiple rasters at different size
+    sizeList=[minPix*2+1, minPix*4+1, minPix*8+1]
+    sizeList.reverse()
+    neigh=list()
+    neigh.append(layBig)
+        
+    for i in sizeList:
+    	pathToFile=os.path.join(dirPart, "simple_"+str(i)+".tif")
+        #calling command
+        simple=p.runalg("grass7:r.neighbors", layBig, 3, i, True, False, "", coords, 0, pathToFile)
+        #add to list of rasters
+        neigh.append(pathToFile)
+    print "list of files to be patched is :"
+    print neigh
+    #patch rasters to obtain generalized map
+    path2=os.path.join(dirPart, "simplePatched.tif")
+    simpPatch=p.runalg("grass7:r.patch",neigh,False,coords,0,path2)
+    print simpPatch 
+    return QgsRasterLayer(simpPatch)
 
-if QgsRasterLayer(lsc_unit['OUTPUT']).isValid():
+####-------------------CODE----------------------------
+
+### A-  Importing and preprocessing
+
+directory=wod+"/"+wodName+str(utmPix)
+dirPart=directory+"/workingFiles"
+dirFin=directory+"/finalOutput"
+if not os.path.exists(directory):
+    os.makedirs(directory)
+    os.makedirs(dirPart)
+    os.makedirs(dirFin)
+
+print "working directory path:"
+print directory
+print dirPart
+print dirFin
+
+# import dem as layer ldem
+ldem=fileImport(dem)
+
+# import land cover as layer llu
+llu=fileImport(lu)
+
+#reproject dem
+newDem=reproj(ldem, ref, utmPix)
+
+# reproject land cover
+newLu=reproj(llu, ref, utmPix)
+# Allignment and resolution check
+print "Land cover (newLu) and dem (newDem) were reprojcted to %f " %(ref)
+     
+### making layer same extension
+# New extent as list
+lluex=getCoord(newLu, 1)
+demex=getCoord(newDem, 1)
+newext=[max(lluex[0], demex[0]), min(lluex[1], demex[1]), max(lluex[2], demex[2]), min(lluex[3], demex[3])]
+newextStr=str(newext[0])+","+str(newext[1])+","+str(newext[2])+","+str(newext[3])
+
+# setting new extension to both rasters
+newLu2=QgsRasterLayer(p.runalg("gdalogr:cliprasterbyextent",newLu,"",newextStr,5,4,75,6,1,False,0,False,"",None)['OUTPUT'])
+newDem2=QgsRasterLayer(p.runalg("gdalogr:cliprasterbyextent",newDem,"",newextStr,5,4,75,6,1,False,0,False,"",None)['OUTPUT'])
+if newLu2.isValid() and newDem2.isValid():
+    print "new extensions:", "land cover", newLu2.extent().toString(), "dem", newDem2.extent().toString()
+else:
+    print "problem correcting raster extension"
+
+#### B- ASPECT and slope from DEM
+
+# calculate aspect
+asp=p.runalg("gdalogr:aspect", newDem2,1,False,False,False,True,None)
+tempAsp=asp['OUTPUT']
+###2 SLOPE
+slo=p.runalg("gdalogr:slope",newDem2,1,False,False,True,1,None)
+tempSlo=slo['OUTPUT']
+# reclassify aspect and slope in classes based on asprul and slorule
+extdem=getCoord(newDem2,0)
+aspClass=p.runalg("grass7:r.reclass", tempAsp,"",asrul,extdem,0,None)
+sloClass=p.runalg("grass7:r.reclass",tempSlo,"",slorul,extdem,0,None)
+
+#### C - Combining all layers and simplifying
+
+#call function to aspect
+
+simpAsp=simp(QgsRasterLayer(aspClass['output']), minar)
+if simpAsp.isValid():
+    print "aspect is simplified"
+else:
+    print "problem with aspect simplification"
+#call function to slope
+simpSlope=simp(QgsRasterLayer(sloClass['output']), minar)
+if simpSlope.isValid():
+    print "slope is simplified"
+else:
+    print "problem with slope simplification"
+
+#call function to land cover
+#simplu=simp(llu.source())['OUTPUT']
+simpLu=simp(llu, minar)
+if simpLu.isValid():
+    print "land use is simplified"
+else:
+    print "problem with land use simplification"
+
+#putting together the rasters
+lscUnit=p.runalg("gdalogr:rastercalculator",simplu,"1",simpasp,"1",simpslope,"1",None,"1",None,"1",None,"1","(A*100)+(B*10)+C","",5,"",os.path.join(dirPart,"lscUnit.tif"))
+if QgsRasterLayer(lscUnit['OUTPUT']).isValid():
+    print "raw landscape units raster is %f" %(lscUnit.source())
+    print lscUnit
+    iface.addRasterLayer(lscUnit['OUTPUT'], "simplified landscape unit")
+
+
 # simplify landscape unit map
-    lsc_unit_simp=simp(lsc_unit)
+    lscUnitSimp=simp(lscUnit['OUTPUT'])
     print "landscape unit map produced"
 
-### 7 translating raster to vector
+### D translating raster to vector
 
-lsc_vect=p.runalg("gdalogr:polygonize",lsc_unit_simp['OUTPUT'],"code",None)
+lscVect=p.runalg("gdalogr:polygonize",lscUnitSimp,"code",None)
 
 #add attributes "land use", "slope", "aspect", "area"
-vect = QgsVectorLayer(lsc_vect['OUTPUT'], "lsc vector", "ogr")
+vect = QgsVectorLayer(lscVect['OUTPUT'], "lsc vector", "ogr")
 
 #dissolve polygons by code
-vect_diss=p.runalg("gdalogr:dissolvepolygons",vect,"geometry","code",True,False,False,False,False,None,"",None)
-Lvect_diss=QgsVectorLayer(vect_diss['OUTPUT_LAYER'], "dissolved", "ogr")
+vectDiss=p.runalg("gdalogr:dissolvepolygons",vect,"geometry","code",True,False,False,False,False,None,"",None)
+LvectDiss=QgsVectorLayer(vectDiss['OUTPUT_LAYER'], "dissolved", "ogr")
 #Add Attributes:
-res = Lvect_diss.dataProvider().addAttributes([\
-    QgsField("land_use", QVariant.String ),\
-    QgsField("slope", QVariant.String),\
+res = LvectDiss.dataProvider().addAttributes([\
+    QgsField("landCover", QVariant.String ),\
     QgsField("aspect", QVariant.String),\
+    QgsField("slope", QVariant.String),\
     ])
-Lvect_diss.updateFields()
+LvectDiss.updateFields()
 
-layer=Lvect_diss
+layer=LvectDiss
 layer.startEditing()
 # removing null area
 expr = QgsExpression( "\"code\"=0" )
@@ -311,9 +289,9 @@ for feature in iter:
     numb=feature['code']
     
     a,b,c=str(numb)
-    feature['land_use'] = lulist[int(a)-1]
-    feature['slope']= slolist[int(b)]
-    feature['aspect'] = asplist[int(c)]
+    feature['landCover'] = lulist[int(a)-1]
+    feature['aspect']= asplist[int(b)-1]
+    feature['slope'] = slolist[int(c)-1]
     #print numb, feature['land_use'], feature['slope'], feature['aspect']
     layer.updateFeature(feature)
 
@@ -327,7 +305,7 @@ layer.commitChanges()
 QgsVectorFileWriter.writeAsVectorFormat(layer, dirFin+'/lsc_map.shp', "", None, "ESRI Shapefile")
 
 # exporting raster map
-copyfile(lsc_unit_simp['OUTPUT'], dirFin+"/lsc_map.tif")
+copyfile(lscUnitSimp, dirFin+"/lsc_map.tif")
 
 
 #exporting source files
@@ -349,9 +327,9 @@ f.close()
 #QgsMapLayerRegistry.instance().addMapLayer(simplu)
 #iface.addRasterLayer(simpasp['OUTPUT'], "simp asp")
 #iface.addRasterLayer(simpslope['OUTPUT'], "simp slope")
-#iface.addRasterLayer(lsc_unit_simp['OUTPUT'], "landscape unit")
-#iface.addVectorLayer(lsc_vect['OUTPUT'], "lsc tvector", "ogr")
+#iface.addRasterLayer(lscUnitSimp['OUTPUT'], "landscape unit")
+#iface.addVectorLayer(lscVect['OUTPUT'], "lsc tvector", "ogr")
 
 #to add exsting layer
-#QgsMapLayerRegistry.instance().addMapLayer(Lvect_diss)
+#QgsMapLayerRegistry.instance().addMapLayer(LvectDiss)
 QgsMapLayerRegistry.instance().addMapLayer(layer)

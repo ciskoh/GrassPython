@@ -104,7 +104,6 @@ else:
     print "\nthe following images will be processed"
     for i in RlistNP:
         print os.path.basename(i)
-	Lfile.write(os.path.basename(i))
 
 # get path of image
 	# import image
@@ -180,7 +179,7 @@ def correct(ipat):
     #For second line
     #read end of basename for date and time
     dateS=baseName.split("_")[2]
-    #MSAVI
+
     month=dateS[4:6]
     day=dateS[6:8]
 
@@ -359,23 +358,9 @@ def correct(ipat):
     print "all working files removed"    
     return final['OUTPUT']
     
-<<<<<<< HEAD
-#calling function
-pool=Pool(88)
-results=pool.map(correct, RlistNP)
-#print RlistNP
-#for ipat in RlistNP:
-    #print ipat
-    #res=correct(ipat)
-    
-    
-    
-	#### 5 Vegetation indices calculation
-=======
 #calling function in parallel mode
 pool=Pool(20)
 results=pool.map(correct, RlistNP)
->>>>>>> MSAVI
 
 ### procedural run
 #print "\n\n"+str(RlistNP)
