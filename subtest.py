@@ -3,16 +3,20 @@
 #CONFIGURATION: FAO land cover map 
 #-----------------------PARAMETERS------------------------------------------
 #### Linux Server PATH TO INPUT FILES FOR TESTING
-#dem="/home/jkm2/GIS/DEM/complete_dem_Filled.tif"
-#lu="/home/jkm2/GIS/land cover/FAO/LandCoverFAO_30.tif"
-#### Linux Server PATH TO INPUT FILES FOR TESTING
-dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/complete_dem_Filled.tif"
-lu="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/land cover/FAO/LandCoverFAO_30.tif"
+dem="/home/jkm2/GIS/DEM/complete_dem_Filled.tif"
+lu="/home/jkm2/GIS/land cover/FAO/LandCoverFAO_30.tif"
+
+#### Linux local
+# DEM dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/complete_dem_Filled.tif"
+# LAND COVER lu="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/land cover/FAO/LandCoverFAO_30.tif"
+
 #### Output directory location & name
-# linux server wod="/home/jkm2/GIS/Analysis/"
-# linux local 
-wod="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Analysis"
-wodName="Lsc_Map_FAO"
+# linux server 
+wod="/home/jkm2/GIS/Analysis"
+# linux local wod="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Analysis"
+wodName="Lsc_Map_FAO2"
+
+#### MAP CREATION PARAMETERS
 #crs of utm zone
 ref=32630
 #### Land use categories
@@ -119,7 +123,7 @@ def simp(lay, minar):
     
     minPix= int(round(sqrt(minar)/res))
     if minPix%2 == 0:
-    	minPix=minPix+1
+        minPix=minPix+1
     
     minHec=minar/10000
     
@@ -129,7 +133,7 @@ def simp(lay, minar):
     
     # get layer with areas above minimum threshold
     pathLayBig=os.path.join(dirPart, "layBig.tif")
-    layBig=p.runalg("grass7:r.reclass.area.greater",lay,0,minHec,coords,0,pathLayBIg)
+    layBig=p.runalg("grass7:r.reclass.area.greater",lay,0,minHec,coords,0,pathLayBig)
     # create multiple rasters at different size
     sizeList=[minPix*2+1, minPix*4+1, minPix*8+1]
     sizeList.reverse()
@@ -161,6 +165,11 @@ if not os.path.exists(directory):
     os.makedirs(directory)
     os.makedirs(dirPart)
     os.makedirs(dirFin)
+
+print "working directory path:"
+print directory
+print dirPart
+print dirFin
 
 # import dem as layer ldem
 ldem=fileImport(dem)

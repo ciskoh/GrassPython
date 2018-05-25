@@ -1,8 +1,13 @@
 #!/usr/bin/env python
+
 # -*- coding: utf-8 -*-
 
 #----------------------------DESCRIPTION
 #Script to preprocess sentinel images and obtain ONLY NDVI /SAVI / MSAVI values
+#TODO:add function 9 to crop raster values to study area
+#TODO 5.0 Altitude average uaing dem (as separate function)
+#TODO add definition of output folder name within ndvi/savi/msavifunctions
+#TODO: correct error below: "wrong parameter value: empty"
 
 #------------------------------SETTINGS-------------------------
 # Prepare the environment
@@ -13,13 +18,12 @@ from qgis.core import *
 #from PyQt4.QtGui import *
 
 QgsApplication.setPrefixPath("/usr", False)
-app = QgsApplication([], True)
+app = QgsApplication([], False)
 app.initQgis()
 sys.path.append('/usr/share/qgis/python/plugins')
 from processing.core.Processing import Processing
 Processing.initialize()
 import processing as p
-
 
 from pyproj import Proj, transform
 from multiprocessing import Pool
@@ -30,9 +34,9 @@ import shutil
 
 #----------------------------PARAMETERS
 #input directory
-# remote dir
+# linux remote dir
 ind="/mnt/cephfs/data/BFH/Geodata/World/Sentinel-2/S2MSI1C/GeoTIFF"
-# local dir ind="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/input"
+# linux local dir ind="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/input"
 #code of image tiles to be analysed
 tiles=['T30STA', 'T30STB', 'T30SUA', 'T30SUB']
 
@@ -41,14 +45,14 @@ yea=[2018]
 
 #
 #path to Dem for topographic correction
-#remote
+#remote linux
 dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
-#local dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
+#local linux dem="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 
 # output directory
-#local dir outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
-#remote dir
-outd="/home/jkm2/GIS/Sentinel_preprocess/test/savi_output"
+#linux local dir outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
+#linux remote dir
+outd="/home/jkm2/GIS/Sentinel_preprocess/test/ndvi_output"
 # working folder for temporary folders
 temp1="/home/jkm2/GIS/Sentinel_preprocess/test/WOD"
 
@@ -423,7 +427,6 @@ def clMask(img, clPath, baseName, wod):
     year=baseName.split("_")[2][0:4]
     tile=baseName.split("_")[5]
     mainDir=os.path.join(clPath, tile, year, baseName+".SAFE")
-    msPath=wod+"cloudmask.tif"
     if not os.path.exists(mainDir):
         print "problem finding cloud mask folder"
 # look for cloudmask in remote folder
@@ -433,17 +436,34 @@ def clMask(img, clPath, baseName, wod):
                 clMpath=os.path.join(r,f)
     cpv=wod+"cloudVec.gml"
     shutil.copy2(clMpath, cpv)
-    lay=QgsVectorLayer(cpv)
-    #stopGo(401,baseName)
+# rasterize cloud mask
+    cloud=QgsVectorLayer(cpv)
+    cloudRes=QgsRasterLayer(img).rasterUnitsPerPixelX()
+    cloudEx=QgsRasterLayer(img).extent().toString().replace(" : ",",")
+    rMaskPath=wod+"clMaskNdvi.tif"
     
-    ms=p.runalg("grass7:r.mask.vect",cpv,img,"","",True,extImg,0,-1,0.0001,msPath)
-    if not QgsRasterLayer(msPath).isValid():
+    print "starting cloud masking with the following parameters:"
+    print "\n\ncloudmask: %s\n" %(cpv)
+    print "cloudRes: %s,\n" %(cloudRes)
+    print "extension: %s\n" %(cloudEx)
+    print "original raster: %s\n" %(img)
+    print "destination raster: %s\n" %(rMaskPath)
+    x=datetime.datetime.now()
+    #TODO: correct error below: "wrong parameter value: empty"
+    p.runalg("grass7:r.mask.vect", cpv, img,"","",True, cloudEx, cloudRes, -1, 0.00001,rMaskPath)
+    y=datetime.datetime.now()
+    c=y-x
+    d=divmod(c.days*86400+c.seconds, 60)
+    print "finished cloud masking in %f minutes and %f seconds" %(d[0], d[1])
+    if not QgsRasterLayer(rMaskPath).isValid():
         print "problem masking image %s function 8 clMask" %baseName
         msPath=img
         	#stopGo(395, baseName)
-    print "output of function 8 clMask is:\n %s" %msPath
-    return msPath
-
+    else:
+        print"output of function 8 clMask is:\n %s" %rMaskPath
+        return rMaskPath
+#9 crop to study area
+#input: stArea
 
 #100.2 Save output in appropriate folder
 #input: Img (STRING) - Image to be saved
@@ -492,6 +512,7 @@ def main(ipat):
 
     ## function to create working directory for this image
     wod=makeWod(baseName, temp1)
+    global wod
     print "wod is %s" %wod
     #output is working folder path
 
@@ -500,7 +521,7 @@ def main(ipat):
         
     global dem
     dem=demCheck(dem, imgCrs, wod)
-
+    raise System
     #output is path to (new) dem
 
         ##------- RED IMAGE
@@ -548,17 +569,16 @@ def main(ipat):
     ## Function to calculate NDVI
     nd=ndCalc(redCor, nirCor, wod)
 
-    ##ALT: function to calculate SAVI
-    nd=saviCalc(redCor, nirCor, wod)
     print "ndvi should be in %s" %nd
     # output should be path to corrected image (NIR)
 #    stopGo(504, baseName)
 
     ## function to mask ndvi using cloudmask of image
-    #TODO:  not working
-    #msNdvi=clMask(nd, clPath, baseName, wod)
+
+    msNdvi=clMask(nd, clPath, baseName, wod)
+    raise SystemExit
+    #stopGo(558, baseName)
     
-    #stopGo(508, baseName)
     
     ##function to export final image (masked NDVI)
     fin=makeOut(nd, baseName, outd)
@@ -627,5 +647,3 @@ print logstr2
 app.exitQgis()
 
 #
-
-
