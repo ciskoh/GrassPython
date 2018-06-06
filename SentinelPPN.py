@@ -21,6 +21,8 @@ QgsApplication.setPrefixPath("/usr", False)
 app = QgsApplication([], False)
 app.initQgis()
 sys.path.append('/usr/share/qgis/python/plugins')
+sys.path.append('/home/jkm2/GIT/QGIS-scripts/pyModule')
+
 from processing.core.Processing import Processing
 Processing.initialize()
 import processing as p
@@ -31,6 +33,7 @@ import datetime
 import numpy as np
 from osgeo import gdal
 import shutil
+import ogr2ogr
 
 #----------------------------PARAMETERS
 #input directory
@@ -52,7 +55,7 @@ dem="/home/jkm2/GIS/DEM/ASTER_big/asterDemUTM/asterDemUTM_comp.tif"
 # output directory
 #linux local dir outd="/home/matt/Dropbox/ongoing/BFH-Pastures/gis data/Sentinel_preprocess/test/output"
 #linux remote dir
-outd="/home/jkm2/GIS/Sentinel_preprocess/test/ndvi_output"
+outd="/home/jkm2/GIS/Sentinel_preprocess/test/ndvi_output22"
 # working folder for temporary folders
 temp1="/home/jkm2/GIS/Sentinel_preprocess/test/WOD"
 
@@ -139,10 +142,7 @@ def imgMd(ipat):
         print "\nLayer failed to load!\n\n -->quitting script on image %s" % baseName
         stopGo(106, baseName)
     # image extension as string
-    extImg="%f,%f,%f,%f" %(orImg.extent().xMinimum(),\
-        orImg.extent().xMaximum(),\
-        orImg.extent().yMinimum(),\
-        orImg.extent().yMaximum())
+    extImg=orImg.extent().toString().replace(" : ",",")
     #check of reference system and reprojection
     imgCrs= orImg.crs()
     #output dictionary
@@ -436,18 +436,17 @@ def clMask(img, clPath, baseName, wod):
                 clMpath=os.path.join(r,f)
     cpv=wod+"cloudVec.gml"
     shutil.copy2(clMpath, cpv)
-# rasterize cloud mask
-    cloud=QgsVectorLayer(cpv)
+# mask raster using vector
     cloudRes=QgsRasterLayer(img).rasterUnitsPerPixelX()
-    cloudEx=QgsRasterLayer(img).extent().toString().replace(" : ",",")
+    cloudEx=extImg
     rMaskPath=wod+"clMaskNdvi.tif"
     
     print "starting cloud masking with the following parameters:"
-    print "\n\ncloudmask: %s\n" %(cpv)
-    print "cloudRes: %s,\n" %(cloudRes)
-    print "extension: %s\n" %(cloudEx)
-    print "original raster: %s\n" %(img)
-    print "destination raster: %s\n" %(rMaskPath)
+    print "parameter 1: cloudMask vector: {}\n" .format(cpv)
+    print "parameter 2: Raster image to mask:{} \n" .format(img)
+    print "parameter 6: extension: {}\n" .format(cloudEx)
+    print "parameter 7: resolution: {}\n" .format(cloudRes)
+    print "parameter 10: output location: {} \n" .format(rMaskPath)
     x=datetime.datetime.now()
     #TODO: correct error below: "wrong parameter value: empty"
     p.runalg("grass7:r.mask.vect", cpv, img,"","",True, cloudEx, cloudRes, -1, 0.00001,rMaskPath)
@@ -458,7 +457,59 @@ def clMask(img, clPath, baseName, wod):
     if not QgsRasterLayer(rMaskPath).isValid():
         print "problem masking image %s function 8 clMask" %baseName
         msPath=img
-        	#stopGo(395, baseName)
+    else:
+        print"output of function 8 clMask is:\n %s" %rMaskPath
+        return rMaskPath
+
+
+
+#8.1 vector mask to exclude clouds using different procedure
+#input: img (STRING) - path to geotiff (NDVI in this case)
+#       clPath (STRING) - path to cloud masks main location
+#       baseName (STRING) - name of image being processed
+#       wod (STRING) - path to working directory
+
+#output (STRING) -path to masked ndvi (clouds excluded)
+def clMask2(img, clPath, baseName, wod):
+    year=baseName. split("_")[2][0:4]
+    tile=baseName.split("_")[5]
+    mainDir=os.path.join(clPath, tile, year, baseName+".SAFE")
+    if not os.path.exists(mainDir):
+        print "problem finding cloud mask folder"
+# look for cloudmask in remote folder
+    for r, d, files in os.walk(mainDir):
+        for f in  files:
+            if f.endswith("B00.gml"):
+                clMpath=os.path.join(r,f)
+    cpv=wod+"cloudVec.shp"
+    #translate gml to shapefile
+    ogr2ogr.main(["","-f", "ESRI Shapefile", "-s_srs", "EPSG:32630", cpv, clMpath])
+    if not QgsVectorLayer(cpv, "cl", "ogr").isValid():
+        print "cloud vector translation didn't go well"
+    else:
+        print "cloud vector translation did work!!"
+    # rasterize cloud mask
+    # parameters to rasterize
+    fName=[field.name() for field in QgsVectorLayer(cpv, "cl", "ogr").pendingFields()][0]
+    print "first field name is"
+    print fName
+    cloudRes=QgsRasterLayer(img).rasterUnitsPerPixelX()
+    cloudRast=wod+"clMask.tif"
+    #rasterization
+    x=datetime.datetime.now()
+    p.runalg("gdalogr:rasterize", cpv, fName, 1, 10,10, extImg, False, 5,0,4,75, 6,1,False,0,"-burn 1 -a_srs 'EPSG:32630'",cloudRast)
+    if not QgsRasterLayer(cloudRast).isValid():
+        #turn null to 0 values in cloud mask and use them
+        print "Cloud raster {cloudRast} has a problem \n"
+    rMaskPath=wod+"clMaskNDVI.tif"
+    p.runalg("gdalogr:rastercalculator", img, "1", cloudRast, "1", None, "1", None, "1", None, "1", None, "1", "A*((-1*B)+1)", "", 5, "", rMaskPath)
+    y=datetime.datetime.now()
+    c=y-x
+    d=divmod(c.days*86400+c.seconds, 60)
+    print "finished cloud masking in %f minutes and %f seconds" %(d[0], d[1])
+    if not QgsRasterLayer(rMaskPath).isValid():
+        print "problem masking image %s function 8 clMask" %baseName
+        msPath=img
     else:
         print"output of function 8 clMask is:\n %s" %rMaskPath
         return rMaskPath
@@ -521,7 +572,7 @@ def main(ipat):
         
     global dem
     dem=demCheck(dem, imgCrs, wod)
-    raise System
+    #raise SystemExit
     #output is path to (new) dem
 
         ##------- RED IMAGE
@@ -538,7 +589,6 @@ def main(ipat):
     redRange=pixRange(Red, wod)
 
     ## function to perform athm. corr. on single band image (RED)
-    extImg=mdDic['extImg']
     redCor=atCorr(Red, baseName, redPar, redRange, bNum, extImg, wod )
 
     # output should be path to corrected image (RED)
@@ -559,7 +609,6 @@ def main(ipat):
     nirRange=pixRange(Nir, wod)
 
     ## function to perform athm. corr. on single band image (NIR)
-    extImg=mdDic['extImg']
     nirCor=atCorr(Nir, baseName, nirPar, nirRange, bNum, extImg, wod )
 
     print "corrected image is %s" %nirCor
@@ -575,13 +624,13 @@ def main(ipat):
 
     ## function to mask ndvi using cloudmask of image
 
-    msNdvi=clMask(nd, clPath, baseName, wod)
-    raise SystemExit
+    msNdvi=clMask2(nd, clPath, baseName, wod)
+#    raise SystemExi
     #stopGo(558, baseName)
     
     
     ##function to export final image (masked NDVI)
-    fin=makeOut(nd, baseName, outd)
+    fin=makeOut(msNdvi, baseName, outd)
     
     #if working files are not needed anymore
     
