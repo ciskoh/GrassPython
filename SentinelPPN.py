@@ -59,9 +59,11 @@ outd="/home/jkm2/GIS/Sentinel_preprocess/test/ndvi_output22"
 # working folder for temporary folders
 temp1="/home/jkm2/GIS/Sentinel_preprocess/test/WOD"
 
-#path to cloud mask
+#path to cloud mask folder
 clPath="/mnt/cephfs/data/BFH/Geodata/World/Sentinel-2/S2MSI1C/SAFE"
 
+# path to study area vector file
+stArea="/home/jkm2/GIS/bound/bb32630.shp"
 #-------------------------------FUNCTIONS---------------------------------
 #100.1 Stop and go function based on user input
 #input lNum (INTEGER) - Line number
@@ -122,7 +124,8 @@ def checkLst(Orlist, Outlist):
     return RlistNP
 
 #2 IMAGE METADATA AND LAYER
-# input: ipat-path to unprocessed image
+# input: ipat (STRING)   - path to unprocessed image
+#      : stArea (VECTOR) - path to study area vector file
 # output: Dictionary with the following data:
 #{ key : value  : type }
 
@@ -131,8 +134,8 @@ def checkLst(Orlist, Outlist):
 #  extImg : Image extension : STRING
 #  imgCrs : reference system : CRSOBJECT
 #
-def imgMd(ipat):
-    global baseName
+def imgMd(ipat, stArea):
+    global  baseName
     global orImg
     global extImg
     global imgCrs
@@ -140,9 +143,12 @@ def imgMd(ipat):
     orImg = QgsRasterLayer(ipat, baseName)
     if not orImg.isValid():
         print "\nLayer failed to load!\n\n -->quitting script on image %s" % baseName
-        stopGo(106, baseName)
-    # image extension as string
-    extImg=orImg.extent().toString().replace(" : ",",")
+        raise SystemExit
+    # image extension as string ADDED new extension to include only parts overlapping study site
+    oldExt=orImg.extent()
+    stExt=QgsVectorLayer(stArea, "stArea", "ogr").extent()
+    newExt=oldExt.intersect(stExt)
+    extImg=newExt.toString().replace(" : ",",")
     #check of reference system and reprojection
     imgCrs= orImg.crs()
     #output dictionary
@@ -371,14 +377,21 @@ def atCorr(singImg, baseName, par, pRange, bNum, extImg, wod):
 def ndCalc(Red, Nir, wod):
     fStr="(B-A)/(B+A)"
     ndPath=wod+"ndvi.tif"
+    ndPath2=wod+"ndviClip.tif"
     nd=p.runalg("gdalogr:rastercalculator",Red,"1",Nir,"1",None,"1",None,"1",None,"1",None,"1",fStr,"",5,"",ndPath)
-    if not QgsRasterLayer(ndPath).isValid():
+    # clip raster to study site area
+#    prepare extension in gdal_translate format (xmin,ymin,xmax,ymax
+    xmin,ymin,xmax,ymax=extImg.split(",")
+    ext="%s %s %s %s" %(xmin,ymax,xmax,ymin)
+    cmd="gdal_translate -ot Float32 -projwin %s %s %s" %(ext, ndPath, ndPath2)
+    os.system(cmd)
+    if not QgsRasterLayer(ndPath2).isValid():
         print "problem cerating NDVI!\n\n -->quitting script on image %s" % baseName
-        #stopGo(367, baseName)
+        raise SystemExit
     else:
         print "output of function 7 ndCalc is: \n\n"
-        print ndPath
-    return ndPath
+        print ndPath2
+        return ndPath2
 
 #7.1 Alternative to NDVI: MSAVI calculation
 #input: Red (STRING) - path to Red band
@@ -386,7 +399,7 @@ def ndCalc(Red, Nir, wod):
 #       wod (STRING) - path to working directory
 #output: path to MSAVI image
 def saviCalc(Red, Nir, wod):
-    fStr="((B-A)*(1+0.7))/(B+A+0.7)"
+    fStr="((B-A)*(1+0. 7))/(B+A+0.7)"
     ndPath=wod+"SAVI.tif"
     nd=p.runalg("gdalogr:rastercalculator",Red,"1",Nir,"1",None,"1",None,"1",None,"1",None,"1",fStr,"",5,"",ndPath)
     if not QgsRasterLayer(ndPath).isValid():
@@ -394,7 +407,7 @@ def saviCalc(Red, Nir, wod):
         #stopGo(367, baseName)
     else:
         print "output of function 7 ndCalc is: \n\n"
-        print ndPath
+        print ndPath 
     return ndPath
 
 #7.2 Alternative to NDVI: MSAVI2 calculation
@@ -404,12 +417,12 @@ def saviCalc(Red, Nir, wod):
 #output: path to MSAVI image
 
 def msavi2Calc(Red, Nir, wod):
-    fStr="(2*B+1-sqrt(((2*B+1)^2)-(8*(B-A)))/2"
+    fStr="(2*B+1-sqrt (((2*B+1)^2)-(8*(B-A)))/2"
     ndPath=wod+"MSAVI2.tif"
     nd=p.runalg("gdalogr:rastercalculator",Red,"1",Nir,"1",None,"1",None,"1",None,"1",None,"1",fStr,"",5,"",ndPath)
     if not QgsRasterLayer(ndPath).isValid():
         print "problem creating MSAVI2!\n\n -->quitting script on image %s" % baseName
-        #stopGo(367, baseName)
+        raise SystemExit
     else:
         print "output of function 7 ndCalc is: \n\n"
         print ndPath
@@ -429,9 +442,10 @@ def clMask(img, clPath, baseName, wod):
     mainDir=os.path.join(clPath, tile, year, baseName+".SAFE")
     if not os.path.exists(mainDir):
         print "problem finding cloud mask folder"
+        raise SystemExit
 # look for cloudmask in remote folder
     for r, d, files in os.walk(mainDir):
-        for f in files:
+        for f in files :
             if f.endswith("B00.gml"):
                 clMpath=os.path.join(r,f)
     cpv=wod+"cloudVec.gml"
@@ -456,7 +470,7 @@ def clMask(img, clPath, baseName, wod):
     print "finished cloud masking in %f minutes and %f seconds" %(d[0], d[1])
     if not QgsRasterLayer(rMaskPath).isValid():
         print "problem masking image %s function 8 clMask" %baseName
-        msPath=img
+        raise SystemExit
     else:
         print"output of function 8 clMask is:\n %s" %rMaskPath
         return rMaskPath
@@ -476,16 +490,23 @@ def clMask2(img, clPath, baseName, wod):
     mainDir=os.path.join(clPath, tile, year, baseName+".SAFE")
     if not os.path.exists(mainDir):
         print "problem finding cloud mask folder"
+        raise SystemExit
+
 # look for cloudmask in remote folder
     for r, d, files in os.walk(mainDir):
         for f in  files:
             if f.endswith("B00.gml"):
                 clMpath=os.path.join(r,f)
+    global clMpath
     cpv=wod+"cloudVec.shp"
+    if not QgsVectorLayer(clMpath, "cl", "ogr").isValid():
+        print "problem with original cloud mask or no clouds in the image"
+        return img
     #translate gml to shapefile
     ogr2ogr.main(["","-f", "ESRI Shapefile", "-s_srs", "EPSG:32630", cpv, clMpath])
     if not QgsVectorLayer(cpv, "cl", "ogr").isValid():
         print "cloud vector translation didn't go well"
+        raise SystemExit
     else:
         print "cloud vector translation did work!!"
     # rasterize cloud mask
@@ -497,19 +518,28 @@ def clMask2(img, clPath, baseName, wod):
     cloudRast=wod+"clMask.tif"
     #rasterization
     x=datetime.datetime.now()
-    p.runalg("gdalogr:rasterize", cpv, fName, 1, 10,10, extImg, False, 5,0,4,75, 6,1,False,0,"-burn 1 -a_srs 'EPSG:32630'",cloudRast)
+    cmd="gdal_rasterize -burn 0 -a_nodata 1000 -a_srs %s -te %s -tr %s %s %s %s" %(imgCrs.authid(), extImg.replace(","," "), cloudRes, cloudRes, cpv, cloudRast)
+    print cmd
+    os.system(cmd)
+    #p.runalg("gdalogr:rasterize", cpv, fName, 1, 10,10, extImg, False, 5,0,4,75, 6,1,False,0,"-burn 1 -a_srs 'EPSG:32630'",cloudRast)
     if not QgsRasterLayer(cloudRast).isValid():
         #turn null to 0 values in cloud mask and use them
         print "Cloud raster {cloudRast} has a problem \n"
+        raise SystemExit
+    # Mask out cloudy pixels
     rMaskPath=wod+"clMaskNDVI.tif"
-    p.runalg("gdalogr:rastercalculator", img, "1", cloudRast, "1", None, "1", None, "1", None, "1", None, "1", "A*((-1*B)+1)", "", 5, "", rMaskPath)
+    cmd="gdal_calc.py -A %s -B %s --outfile=%s --calc='A*(B>0)' " %(img, cloudRast, rMaskPath)
+    print(cmd)
+    os.system(cmd)
+    #p.runalg("gdalogr:rastercalculator", img, "1", cloudRast, "1", None, "1", None, "1", None, "1", None, "1", "A*((-1*B)+1)", "", 5, "", rMaskPath)
+    #TODO add gdal calc expression
     y=datetime.datetime.now()
     c=y-x
     d=divmod(c.days*86400+c.seconds, 60)
     print "finished cloud masking in %f minutes and %f seconds" %(d[0], d[1])
     if not QgsRasterLayer(rMaskPath).isValid():
         print "problem masking image %s function 8 clMask" %baseName
-        msPath=img
+        raise systemExit
     else:
         print"output of function 8 clMask is:\n %s" %rMaskPath
         return rMaskPath
@@ -533,7 +563,7 @@ def makeOut(Img, baseName, outd):
     shutil.copy2(Img, outPath)
     if not QgsRasterLayer(outPath).isValid():
         print "problem saving final image %s\n\n -->quitting script on function 100.2 makeOut"
-        #stopGo(415, baseName)
+        raise SystemExit
         
     print "output of function 100.2 makeOut is:\n %s" %outPath
     return outPath
@@ -556,7 +586,7 @@ def cleanUp(wod, baseName):
 def main(ipat):
     print "\n\n***START PROCESSING IMAGE: %s***" %os.path.basename(ipat)
 ##   call function to get image metadata
-    mdDic=imgMd(ipat)
+    mdDic=imgMd(ipat, stArea)
 
     #output should be dictionary
     
