@@ -27,6 +27,7 @@ from decimal import *
 import numpy as np
 import gdal
 import osgeo.osr as osr
+import multiprocessing as mu
 
 #-----------------------------PARAMETERS-------------------------
 #folder with numpyarrays for each image
@@ -41,9 +42,10 @@ orWodName="productivity"
 
 # Values for productivity calculations
 #slope
-sloProd=200.14
+
+sloProd=38325.390
 # intercept
-intProd=3.5
+intProd=-2738
 
 #-----------------------------FUNCTIONS--------------------------
 def mkWod(parent, orWodName):
@@ -125,8 +127,7 @@ def mkBio(arr, sloProd, intProd):
 #        intProd - FLOAT - intercept of regression analysis
 #output: ARRAY with biomass values
 
-    tProdAr=np.multiply(arr, sloProd)
-    prodAr=np.add(arr, intProd)
+    prodAr=(arr*sloProd)-intProd
     return prodAr
 
 def maskAr(ar1, ar2, val):
@@ -138,9 +139,10 @@ def maskAr(ar1, ar2, val):
 # output: ARRAY wiith Ar2 values only where Ar1 value is VAL
 
 #create mask on landscape map
-    m=np.ma.masked_not_equal(ar1,cat,copy=False)
     #apply mask on biomass array
-    mAr=np.ma.masked_where(np.ma.getmask(m), ar2)
+    #TODO problem with this operation!
+    mAr=np.ma.masked_where(ar1!=val, ar2)
+    print "avg value of category %s is %s" %(val, np.average(mAr))
     return mAr
 
 def getVals(Ar):
@@ -160,13 +162,15 @@ def getVals(Ar):
     #print "cells above 90th perc: %s" %(test)
     return finLst
 
+
+
 #-----------------------------CODE-------------------------------
 #create working directory
 mkWod(parent, orWodName)
 
 #Read files from input folder
 inList={}
-for r,d,files in os.walk(inFold):
+for r, d, files in os.walk(inFold):
     for f in files:
         if f.endswith(".tif"):
             date=f[2:10]
@@ -177,16 +181,11 @@ for r,d,files in os.walk(inFold):
 print "\nfound images to be processed!\n"+" ".join(inList.keys())+"\n\n"
 
 # make landscape map compatible with ndvi images and extract array
-refRast=QgsRasterLayer(inList[inList.keys()[0]])
-lscAr=makeSim(refRast, LSC)
+refRast= QgsRasterLayer(inList[inList.keys()[0]])
+lscAr= makeSim(refRast, lsc)
 
-#TODO: add cycle through list of arrays
+# add cycle through list of arrays
 
-
-
-#temporary substitution
-myArPath=inList[inList.keys()[1]]
-date=inList.keys()[1]
 for date in inList.keys():
     print "working on date %s\n" %(date)
     myArPath=inList[date]
@@ -204,43 +203,56 @@ for date in inList.keys():
     arr3=np.ma.masked_invalid(arr2)
 
     #masking out areas outside landscape map
-    test="(lscAr>0) & (~np.isnan(lscAr))"
-    arr4=np.ma.masked_where((lscAr>0) & (~np.isnan(lscAr)), arr3)
+    arr4=np.ma.masked_where(lscAr<=0, arr3)
     # 1 Transform NDVI values to Biomass values in grams(?)
     bArr=mkBio(arr4, sloProd, intProd)
+
     global bArr
     #Degradation map
     #loop to unique values in landscape map
     lCat=list(np.unique(lscAr))
     lCat.remove(0)
 
-    degAr=np.copy(bArr)
-    degAr2=np.copy(bArr)
+    degAr=np.ma.copy(bArr)
+    degAr2=np.ma.copy(bArr)
     degAr2.fill(999)
 
-    for cat in lCat:
-        print "working on category %s" %(cat)
+    #prepare for parallel processing with mapDeg function
+    for lsCat in lCat:
+        print "working o n category %s" %(lsCat)
 
-        mAr=maskAr(lscAr, degAr, cat)
+        mAr=maskAr(lscAr, degAr, lsCat)
         tmask=mAr.mask
+        
         mArClean=mAr[mAr.mask==False]
         mArClean2=mArClean[~np.isnan(mArClean)]
     #raise SystemExit
 
     #get threshold values for this area
-        tVals=getVals(mArClean2)
+                
+    # condition to check if layer is not empty
+        if np.ma.count(mArClean2)>5:
+            tVals=getVals(mArClean2)
 
     # rescale values based on quantile calculation
-        mArClean2[mArClean2<=tVals[1]]=1
-        mArClean2[(mArClean2>=tVals[1]) & (mArClean2<tVals[2])]=2
-        mArClean2[(mArClean2>=tVals[2]) & (mArClean2<tVals[3])]=3
-        mArClean2[mArClean2>=tVals[3]]=4
+            mArClean2[mArClean2<=tVals[1]]=1
+            mArClean2[(mArClean2>=tVals[1]) & (mArClean2<tVals[2])]=2
+            mArClean2[(mArClean2>=tVals[2]) & (mArClean2<tVals[3])]=3
+            mArClean2[mArClean2>=tVals[3]]=4
 
-        print "values of reclassed array are : %s" %(np.unique(mArClean2))
+            print "values of reclassed array are : %s" %(np.unique(mArClean2))
+            degAr2[(tmask==False) & (~np.isnan(degAr))]=mArClean2
+        else:
+            print "no valid values in mask"
+            
 
     # Filling values of DegAr
-        degAr[(tmask==False) & (~np.isnan(degAr))]=mArClean2
-        degAr2[(tmask==False) & (~np.isnan(degAr))]=mArClean2
+            degAr2[(tmask==False) & (~np.isnan(degAr))]=999
+
+        print "cycle finished"
+
+#temporary substitution
+
 
 
     # export array degAr to raster
@@ -251,7 +263,8 @@ for date in inList.keys():
     rfGeo=myRast.GetGeoTransform()
 
     drv = gdal.GetDriverByName("GTiff")
-    ds = drv.Create(finRast,rast.RasterXSize, rast.RasterYSize, 2, gdal.GDT_Float32)
+    ds = drv.Create(finRast,myRast.RasterXSize, myRast.RasterYSize, 2, gdal.GDT_Float32)
+    ds.SetGeoTransform(rfGeo)
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(32630)
     ds.SetProjection(srs.ExportToWkt())
